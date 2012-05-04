@@ -13,7 +13,7 @@ getDirectory path = Node path <$> getChildren
           children <- map (path </>) . filter (`notElem` [".",".."]) 
                       <$> getDirectoryContents path
           forM children $ \c -> do
-            b <- doesDirectoryExist c
-            if b 
+            p <- doesDirectoryExist c
+            if p 
               then getDirectory c
               else return $ Node c []
