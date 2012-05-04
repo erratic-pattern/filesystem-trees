@@ -14,6 +14,9 @@ import Control.Applicative
 
 newtype Directory = Directory FilePath deriving (Eq, Ord, Show, Read, IsString)
 
+getFilePath :: Directory -> FilePath
+getFilePath (Directory p) = p
+
 getDir :: Directory -> IO (Tree FilePath)
 getDir (Directory path) = Node path <$> getChildren
   where getChildren = do
