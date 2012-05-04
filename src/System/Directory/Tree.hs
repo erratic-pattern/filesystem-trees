@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module System.Directory.Tree 
-       (Directory, getFilePath, getDir 
+       (Directory, getFilePath, getDir, getDir'
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
@@ -18,12 +18,19 @@ getFilePath :: Directory -> FilePath
 getFilePath (Directory p) = p
 
 getDir :: Directory -> IO (Tree FilePath)
-getDir (Directory path) = Node path <$> getChildren
+getDir = _getDir unsafeInterleaveIO
+
+getDir' :: Directory -> IO (Tree FilePath)
+getDir' = _getDir id
+
+_getDir :: (IO (Tree FilePath) -> IO (Tree FilePath)) -> Directory
+           -> IO (Tree FilePath)
+_getDir f (Directory path) = Node path <$> getChildren
   where getChildren = do
           children <- map (path </>) . filter (`notElem` [".",".."]) 
                       <$> getDirectoryContents path
           forM children $ \c -> do
             p <- doesDirectoryExist c
             if p 
-              then unsafeInterleaveIO . getDir . fromString $ c
+              then f . getDir . fromString $ c
               else return $ Node c []
