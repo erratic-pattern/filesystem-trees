@@ -1,0 +1,17 @@
+Name: directory-trees
+Version: 0
+Cabal-Version: >= 1.6
+License: BSD3
+License-File: LICENSE
+Author: Adam Curtis
+Maintainer: acurtis@spsu.edu
+Build-type: Simple
+
+library
+  hs-source-dirs: src
+  ghc-options: -Wall
+  build-depends:   base == 4.*
+                 , directory
+                 , filepath
+                 , containers
+  exposed-modules: System.Directory.Tree
