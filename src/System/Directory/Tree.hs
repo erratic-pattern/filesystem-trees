@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module System.Directory.Tree 
-       (Directory, getDir 
+       (Directory, getFilePath, getDir 
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
