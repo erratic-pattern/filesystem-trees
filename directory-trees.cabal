@@ -1,11 +1,12 @@
 Name: directory-trees
 Version: 0
+Synopsis: Recursively manipulate and traverse directories as rose trees.
 Cabal-Version: >= 1.6
 License: BSD3
 License-File: LICENSE
 Author: Adam Curtis
 Maintainer: acurtis@spsu.edu
-Build-type: Simple
+Build-Type: Simple
 
 library
   hs-source-dirs: src
@@ -13,5 +14,8 @@ library
   build-depends:   base == 4.*
                  , directory
                  , filepath
-                 , containers
+                 , unix
+                 , containers >= 0.1 && < 0.6
+                 , data-default
+                 , cond == 0.0.*
   exposed-modules: System.Directory.Tree
