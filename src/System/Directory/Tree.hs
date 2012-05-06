@@ -29,7 +29,7 @@ import Data.Word (Word)
 data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
 
 instance Default Options where
-  def = Options { followSymLinks = True }
+  def = Options { followSymLinks = False }
 
 defaultOptions :: Options
 defaultOptions = def
