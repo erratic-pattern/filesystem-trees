@@ -9,7 +9,7 @@ module System.Directory.Tree
        , Options(..), defaultOptions
          -- * Operations on directory trees
          -- **basic operations
-       , popRoot
+       , pop, flatten
          -- **find subtrees
        , findPaths, findPathsM
          -- **filter subtrees
@@ -25,6 +25,7 @@ import System.Directory (getDirectoryContents, doesDirectoryExist)
 import System.FilePath ((</>))
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 import Data.Tree (Tree(..), Forest)
+import qualified Data.Tree as Tree (flatten)
 import Data.DList as DL (DList(..), cons, append, toList, empty)
 
 import Data.Foldable (foldrM)
@@ -73,9 +74,12 @@ getDir_ f o@Options {..} path = Node path <$> getChildren
               ( return $ Node c [] )
 
 
-popRoot :: Tree FilePath -> Forest FilePath
-popRoot (Node path children) = map prepend children
+pop :: Tree FilePath -> Forest FilePath
+pop (Node path children) = map prepend children
   where prepend (Node p c) = Node (path </> p) c
+
+flatten :: Tree FilePath -> [FilePath]
+flatten = Tree.flatten . prependPaths 
 
 filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
 filterPaths p = fst . extractPaths p
@@ -120,18 +124,19 @@ extractPathsM_ p = foldrM extract ([], DL.empty) . map prependPaths
           return (ts, t `cons` es)
         )
 
-prependPaths :: Tree FilePath -> Tree FilePath
-prependPaths (Node root childs) = Node root (map (prepend' root) childs)
-  where 
-    prepend' parent (Node p c) = Node p' $ map (prepend' p') c
-      where p' = parent </> p
-
 truncateAt :: Word -> Forest FilePath -> Forest FilePath
 truncateAt n = mapMaybe (truncate' 0)
   where 
     truncate' i (Node p children)
       | i >= n = Nothing
       | otherwise = Just . Node p . mapMaybe (truncate' (i+1)) $ children
+
+
+prependPaths :: Tree FilePath -> Tree FilePath
+prependPaths (Node root childs) = Node root (map (prepend' root) childs)
+  where 
+    prepend' parent (Node p c) = Node p' $ map (prepend' p') c
+      where p' = parent </> p
 
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
