@@ -38,23 +38,23 @@ getDirectory' :: FilePath -> IO (Tree FilePath)
 getDirectory' = getDir' def
 
 getDir :: Options -> FilePath -> IO (Tree FilePath)
-getDir = _getDir unsafeInterleaveIO
+getDir = getDir_ unsafeInterleaveIO
 
 getDir' :: Options -> FilePath -> IO (Tree FilePath)
-getDir' = _getDir id
+getDir' = getDir_ id
 
-_getDir :: (IO (Tree FilePath) -> IO (Tree FilePath)) 
+getDir_ :: (IO (Tree FilePath) -> IO (Tree FilePath)) 
            -> Options
            -> FilePath
            -> IO (Tree FilePath)
-_getDir f o@Options {..} path = Node path <$> getChildren
+getDir_ f o@Options {..} path = Node path <$> getChildren
   where getChildren = do
           children <- map (path </>) . filter (`notElem` [".",".."]) 
                       <$> getDirectoryContents path
           forM children $ \c ->
             ifM (doesDirectoryExist c <&&> (return followSymLinks
                                             <||> (not <$> isSymLink c)))
-              ( f . _getDir f o $ c )
+              ( f . getDir_ f o $ c )
               ( return $ Node c [] )
 
 filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
