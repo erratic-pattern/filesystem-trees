@@ -1,10 +1,22 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards #-}
 module System.Directory.Tree 
-       ( Options(..), defaultOptions
+       ( -- *Tree structure
+         -- |Re-exported from "Data.Tree"
+         Tree(..)
+         -- *Retrieve directory trees from filesystem
        , getDir, getDir'
        , getDirectory, getDirectory'
-       , filterPaths, findPaths, extractPaths
-       , filterPathsM, findPathsM, extractPathsM
+       , Options(..), defaultOptions
+         -- * Operations on directory trees
+         -- **basic operations
+       , popRoot
+         -- **find subtrees
+       , findPaths, findPathsM
+         -- **filter subtrees
+       , filterPaths, filterPathsM
+         -- **extract subtrees
+       , extractPaths, extractPathsM
+       , -- **truncate tree to a maximum level
        , truncateAt
        )where
 
@@ -59,6 +71,10 @@ getDir_ f o@Options {..} path = Node path <$> getChildren
                                             <||> (not <$> isSymLink c)))
               ( f . getDir_ f o $ c )
               ( return $ Node c [] )
+
+
+popRoot :: Tree FilePath -> Forest FilePath
+popRoot (Node path children) = map (path </>) children
 
 filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
 filterPaths p = fst . extractPaths p
