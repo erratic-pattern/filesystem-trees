@@ -9,7 +9,7 @@ module System.Directory.Tree
        , Options(..), defaultOptions
          -- * Operations on directory trees
          -- **basic operations
-       , pop, flatten
+       , pop, pop_, flatten
          -- **find subtrees
        , findPaths, findPathsM
          -- **filter subtrees
@@ -74,9 +74,12 @@ getDir_ f o@Options {..} path = Node path <$> getChildren
               ( return $ Node c [] )
 
 
-pop :: Tree FilePath -> Forest FilePath
-pop (Node path children) = map prepend children
+pop :: Tree FilePath -> (FilePath, Forest FilePath)
+pop (Node path children) = (path, map prepend children)
   where prepend (Node p c) = Node (path </> p) c
+
+pop_ :: Tree FilePath -> Forest FilePath
+pop_ = snd . pop
 
 flatten :: Tree FilePath -> [FilePath]
 flatten = Tree.flatten . prependPaths 
