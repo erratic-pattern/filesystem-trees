@@ -13,15 +13,14 @@ import System.FilePath ((</>))
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 import Data.Tree (Tree(..), Forest)
 import Data.DList as DL (DList(..), cons, append, toList, empty)
-import Data.String (IsString, fromString)
-import Data.Default
 
 import Data.Foldable (foldrM)
-import Control.Monad
-import Control.Monad.Identity
-import Control.Applicative
+import Control.Monad (forM, liftM)
+import Control.Monad.Identity (runIdentity)
+import Control.Applicative ((<$>))
 import Control.Arrow (second)
-import Control.Cond
+import Control.Cond (ifM, (<||>), (<&&>))
+import Data.Default (Default(..))
 
 
 data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
@@ -33,10 +32,10 @@ defaultOptions :: Options
 defaultOptions = def
 
 getDirectory :: FilePath -> IO (Tree FilePath)
-getDirectory = getDir defaultOptions
+getDirectory = getDir def
 
 getDirectory' :: FilePath -> IO (Tree FilePath)
-getDirectory' = getDir' defaultOptions
+getDirectory' = getDir' def
 
 getDir :: Options -> FilePath -> IO (Tree FilePath)
 getDir = _getDir unsafeInterleaveIO
@@ -55,7 +54,7 @@ _getDir f o@Options {..} path = Node path <$> getChildren
           forM children $ \c ->
             ifM (doesDirectoryExist c <&&> (return followSymLinks
                                             <||> (not <$> isSymLink c)))
-              ( f . _getDir f o . fromString $ c )
+              ( f . _getDir f o $ c )
               ( return $ Node c [] )
 
 filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
@@ -94,7 +93,6 @@ extractPathsM_ p = foldrM extract ([], DL.empty)
         (
           return (ts, t `cons` es)
         )
-
 
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
