@@ -68,29 +68,27 @@ findPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
 findPaths p = snd . extractPaths p
 
 
-extractPaths :: (FilePath -> Bool) 
-                -> Forest FilePath -> (Forest FilePath, Forest FilePath)
+extractPaths :: (FilePath -> Bool) -> Forest FilePath 
+                -> (Forest FilePath, Forest FilePath)
 extractPaths p = runIdentity . extractPathsM (return . p)
 
 filterPathsM :: Monad m =>
-                (FilePath -> m Bool)
-                -> Forest FilePath
+                (FilePath -> m Bool) -> Forest FilePath
                 -> m (Forest FilePath)
 filterPathsM p = liftM fst . extractPathsM p
 
 findPathsM :: Monad m =>
-              (FilePath -> m Bool) -> Forest FilePath -> m (Forest FilePath)
+              (FilePath -> m Bool) -> Forest FilePath 
+              -> m (Forest FilePath)
 findPathsM p = liftM snd . extractPathsM p
 
 extractPathsM :: Monad m => 
-                 (FilePath -> m Bool) 
-                 -> Forest FilePath  
+                 (FilePath -> m Bool) -> Forest FilePath  
                  -> m (Forest FilePath, Forest FilePath)
 extractPathsM p = liftM (second toList) . extractPathsM_ p
 
 extractPathsM_ :: Monad m => 
-                  (FilePath -> m Bool) 
-                  -> Forest FilePath 
+                  (FilePath -> m Bool) -> Forest FilePath 
                   -> m (Forest FilePath, DList (Tree FilePath))
 extractPathsM_ p = foldrM extract ([], DL.empty)
   where 
