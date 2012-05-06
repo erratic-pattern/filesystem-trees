@@ -20,8 +20,9 @@ import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Control.Cond (ifM, (<||>), (<&&>))
-import Data.Default (Default(..))
 
+import Data.Default (Default(..))
+import Data.Word (Word)
 
 data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
 
@@ -95,7 +96,7 @@ extractPathsM_ p = foldrM extract ([], DL.empty)
         )
 
 
-truncateAt :: Int -> Forest FilePath -> Forest FilePath
+truncateAt :: Word -> Forest FilePath -> Forest FilePath
 truncateAt n = mapMaybe (truncate 0)
   where 
     truncate i (Node p children)
