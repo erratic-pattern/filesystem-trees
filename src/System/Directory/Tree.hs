@@ -4,6 +4,7 @@ module System.Directory.Tree
        ,getDir, getDir'
        ,getDirectory, getDirectory'
        ,filterPaths, extractPaths
+       ,filterPathsM, extractPathsM
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
@@ -15,7 +16,9 @@ import Data.DList as DL (DList(..), cons, append, toList, empty)
 import Data.String (IsString, fromString)
 import Data.Default
 
+import Data.Foldable (foldrM)
 import Control.Monad
+import Control.Monad.Identity
 import Control.Applicative
 import Control.Arrow (second)
 import Control.Cond
@@ -34,23 +37,6 @@ getDirectory = getDir defaultOptions
 
 getDirectory' :: FilePath -> IO (Tree FilePath)
 getDirectory' = getDir' defaultOptions
-
-filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
-filterPaths p = fst . extractPaths p
-
-
-extractPaths :: (FilePath -> Bool) 
-                -> Forest FilePath -> (Forest FilePath, Forest FilePath)
-extractPaths p = second toList . extractPaths_ p
-
-extractPaths_ :: (FilePath -> Bool) 
-                -> Forest FilePath -> (Forest FilePath, DList (Tree FilePath))
-extractPaths_ p = foldr extract ([], DL.empty)
-  where
-    extract t@(Node path children) (ts, es)
-      | p path = let (children', es') = extractPaths_ p children 
-                 in (Node path children' : ts, es' `append` es)
-      | otherwise = (ts, t `cons` es)
 
 getDir :: Options -> FilePath -> IO (Tree FilePath)
 getDir = _getDir unsafeInterleaveIO
@@ -71,6 +57,44 @@ _getDir f o@Options {..} path = Node path <$> getChildren
                                             <||> (not <$> isSymLink c)))
               ( f . _getDir f o . fromString $ c )
               ( return $ Node c [] )
-                       
+
+filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
+filterPaths p = fst . extractPaths p
+
+
+extractPaths :: (FilePath -> Bool) 
+                -> Forest FilePath -> (Forest FilePath, Forest FilePath)
+extractPaths p = runIdentity . extractPathsM (return . p)
+
+filterPathsM :: Monad m =>
+                (FilePath -> m Bool)
+                -> Forest FilePath
+                -> m (Forest FilePath)
+filterPathsM p = liftM fst . extractPathsM p
+
+extractPathsM :: Monad m => 
+                 (FilePath -> m Bool) 
+                 -> Forest FilePath 
+                 -> m (Forest FilePath, Forest FilePath)
+extractPathsM p = liftM (second toList) . extractPathsM_ p
+
+extractPathsM_ :: Monad m => 
+                  (FilePath -> m Bool) 
+                  -> Forest FilePath 
+                  -> m (Forest FilePath, DList (Tree FilePath))
+extractPathsM_ p = foldrM extract ([], DL.empty)
+  where 
+    extract t@(Node path children) (ts, es)
+      = ifM (p path)
+        ( do
+             (children', es') <- extractPathsM_ p children
+             let t' = Node path children'
+             return (t' : ts, es' `append` es)
+        )
+        (
+          return (ts, t `cons` es)
+        )
+
+
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
