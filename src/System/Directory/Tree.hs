@@ -1,10 +1,11 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards #-}
 module System.Directory.Tree 
-       (Options(..), defaultOptions
-       ,getDir, getDir'
-       ,getDirectory, getDirectory'
-       ,filterPaths, extractPaths
-       ,filterPathsM, extractPathsM
+       ( Options(..), defaultOptions
+       , getDir, getDir'
+       , getDirectory, getDirectory'
+       , filterPaths, extractPaths
+       , filterPathsM, extractPathsM
+       , truncateAt
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
@@ -19,6 +20,7 @@ import Control.Monad (forM, liftM)
 import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
+import Data.Maybe (mapMaybe)
 import Control.Cond (ifM, (<||>), (<&&>))
 
 import Data.Default (Default(..))
@@ -101,7 +103,7 @@ truncateAt n = mapMaybe (truncate 0)
   where 
     truncate i (Node p children)
       | i >= n = Nothing
-      | otherwise = Just . Node p $ mapMaybe (truncate (i+1))
+      | otherwise = Just . Node p . mapMaybe (truncate (i+1)) $ children
 
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
