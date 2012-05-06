@@ -2,7 +2,7 @@
 module System.Directory.Tree 
        ( -- *Tree structure
          -- |Re-exported from "Data.Tree"
-         Tree(..)
+         Tree(..), Forest
          -- *Retrieve directory trees from filesystem
        , getDir, getDir'
        , getDirectory, getDirectory'
