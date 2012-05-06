@@ -94,5 +94,13 @@ extractPathsM_ p = foldrM extract ([], DL.empty)
           return (ts, t `cons` es)
         )
 
+
+truncateAt :: Int -> Forest FilePath -> Forest FilePath
+truncateAt n = mapMaybe (truncate 0)
+  where 
+    truncate i (Node p children)
+      | i >= n = Nothing
+      | otherwise = Just . Node p $ mapMaybe (truncate (i+1))
+
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
