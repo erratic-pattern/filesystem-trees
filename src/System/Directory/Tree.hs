@@ -3,8 +3,8 @@ module System.Directory.Tree
        ( Options(..), defaultOptions
        , getDir, getDir'
        , getDirectory, getDirectory'
-       , filterPaths, extractPaths
-       , filterPathsM, extractPathsM
+       , filterPaths, findPaths, extractPaths
+       , filterPathsM, findPathsM, extractPathsM
        , truncateAt
        )where
 
@@ -64,6 +64,10 @@ filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
 filterPaths p = fst . extractPaths p
 
 
+findPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
+findPaths p = snd . extractPaths p
+
+
 extractPaths :: (FilePath -> Bool) 
                 -> Forest FilePath -> (Forest FilePath, Forest FilePath)
 extractPaths p = runIdentity . extractPathsM (return . p)
@@ -74,9 +78,13 @@ filterPathsM :: Monad m =>
                 -> m (Forest FilePath)
 filterPathsM p = liftM fst . extractPathsM p
 
+findPathsM :: Monad m =>
+              (FilePath -> m Bool) -> Forest FilePath -> m (Forest FilePath)
+findPathsM p = liftM snd . extractPathsM p
+
 extractPathsM :: Monad m => 
                  (FilePath -> m Bool) 
-                 -> Forest FilePath 
+                 -> Forest FilePath  
                  -> m (Forest FilePath, Forest FilePath)
 extractPathsM p = liftM (second toList) . extractPathsM_ p
 
@@ -96,7 +104,6 @@ extractPathsM_ p = foldrM extract ([], DL.empty)
         (
           return (ts, t `cons` es)
         )
-
 
 truncateAt :: Word -> Forest FilePath -> Forest FilePath
 truncateAt n = mapMaybe (truncate 0)
