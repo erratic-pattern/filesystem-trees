@@ -1,20 +1,23 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards #-}
 module System.Directory.Tree 
-       (Options(..), defaultOptions,
-        getDir, getDir',
-        getDirectory, getDirectory'
+       (Options(..), defaultOptions
+       ,getDir, getDir'
+       ,getDirectory, getDirectory'
+       ,filterPaths, extractPaths
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
 import System.Directory (getDirectoryContents, doesDirectoryExist)
 import System.FilePath ((</>))
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
-import Data.Tree (Tree(..))
+import Data.Tree (Tree(..), Forest)
+import Data.DList as DL (DList(..), cons, append, toList, empty)
 import Data.String (IsString, fromString)
 import Data.Default
 
 import Control.Monad
 import Control.Applicative
+import Control.Arrow (second)
 import Control.Cond
 
 
@@ -31,6 +34,23 @@ getDirectory = getDir defaultOptions
 
 getDirectory' :: FilePath -> IO (Tree FilePath)
 getDirectory' = getDir' defaultOptions
+
+filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
+filterPaths p = fst . extractPaths p
+
+
+extractPaths :: (FilePath -> Bool) 
+                -> Forest FilePath -> (Forest FilePath, Forest FilePath)
+extractPaths p = second toList . extractPaths_ p
+
+extractPaths_ :: (FilePath -> Bool) 
+                -> Forest FilePath -> (Forest FilePath, DList (Tree FilePath))
+extractPaths_ p = foldr extract ([], DL.empty)
+  where
+    extract t@(Node path children) (ts, es)
+      | p path = let (children', es') = extractPaths_ p children 
+                 in (Node path children' : ts, es' `append` es)
+      | otherwise = (ts, t `cons` es)
 
 getDir :: Options -> FilePath -> IO (Tree FilePath)
 getDir = _getDir unsafeInterleaveIO

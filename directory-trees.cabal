@@ -16,6 +16,7 @@ library
                  , filepath
                  , unix
                  , containers >= 0.1 && < 0.6
+                 , dlist
                  , data-default
                  , cond == 0.0.*
   exposed-modules: System.Directory.Tree
