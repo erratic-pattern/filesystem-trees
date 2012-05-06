@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards #-}
-module System.Directory.Tree 
+module System.Directory.Tree
        ( -- *Tree structure
          -- |Re-exported from "Data.Tree"
          Tree(..), Forest
@@ -16,7 +16,7 @@ module System.Directory.Tree
        , filterPaths, filterPathsM
          -- **extract subtrees
        , extractPaths, extractPathsM
-       , -- **truncate tree to a maximum level
+         -- **truncate tree to a maximum level
        , truncateAt
        )where
 
@@ -74,7 +74,8 @@ getDir_ f o@Options {..} path = Node path <$> getChildren
 
 
 popRoot :: Tree FilePath -> Forest FilePath
-popRoot (Node path children) = map (path </>) children
+popRoot (Node path children) = map prepend children
+  where prepend (Node p c) = Node (path </> p) c
 
 filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
 filterPaths p = fst . extractPaths p
@@ -106,12 +107,12 @@ extractPathsM p = liftM (second toList) . extractPathsM_ p
 extractPathsM_ :: Monad m => 
                   (FilePath -> m Bool) -> Forest FilePath 
                   -> m (Forest FilePath, DList (Tree FilePath))
-extractPathsM_ p = foldrM extract ([], DL.empty)
+extractPathsM_ p = foldrM extract ([], DL.empty) . map prependPaths
   where 
     extract t@(Node path children) (ts, es)
       = ifM (p path)
         ( do
-             (children', es') <- extractPathsM_ p children
+             (children', es') <- foldrM extract (ts, es) children
              let t' = Node path children'
              return (t' : ts, es' `append` es)
         )
@@ -119,12 +120,18 @@ extractPathsM_ p = foldrM extract ([], DL.empty)
           return (ts, t `cons` es)
         )
 
-truncateAt :: Word -> Forest FilePath -> Forest FilePath
-truncateAt n = mapMaybe (truncate 0)
+prependPaths :: Tree FilePath -> Tree FilePath
+prependPaths (Node root childs) = Node root (map (prepend' root) childs)
   where 
-    truncate i (Node p children)
+    prepend' parent (Node p c) = Node p' $ map (prepend' p') c
+      where p' = parent </> p
+
+truncateAt :: Word -> Forest FilePath -> Forest FilePath
+truncateAt n = mapMaybe (truncate' 0)
+  where 
+    truncate' i (Node p children)
       | i >= n = Nothing
-      | otherwise = Just . Node p . mapMaybe (truncate (i+1)) $ children
+      | otherwise = Just . Node p . mapMaybe (truncate' (i+1)) $ children
 
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
