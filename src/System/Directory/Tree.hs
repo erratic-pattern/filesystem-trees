@@ -1,9 +1,16 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards, DeriveDataTypeable, 
+             FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies, 
+             TypeSynonymInstances
+  #-}
 module System.Directory.Tree
-       ( -- *Tree structure
+       ( -- *Directory tree structure
+         FSTree(..), FSForest, mkFSTree, unFSTree
+         -- *Generic rose trees 
          -- |Re-exported from "Data.Tree"
-         Tree(..), Forest
-         -- *Retrieve directory trees from filesystem
+       , Tree(..), Forest
+         -- * Overloaded tree lenses
+       , TreeLens(..)
+         -- *Retrieve directory trees from the filesystem
        , getDir, getDir'
        , getDirectory, getDirectory'
        , Options(..), defaultOptions
@@ -11,11 +18,11 @@ module System.Directory.Tree
          -- **basic operations
        , pop, pop_, flatten
          -- **find subtrees
-       , findPaths, findPathsM
+       , find, findM
          -- **filter subtrees
-       , filterPaths, filterPathsM
+       , filter, filterM
          -- **extract subtrees
-       , extractPaths, extractPathsM
+       , extract, extractM
          -- **truncate tree to a maximum level
        , truncateAt
        )where
@@ -27,8 +34,11 @@ import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 import Data.Tree (Tree(..), Forest)
 import qualified Data.Tree as Tree (flatten)
 import Data.DList as DL (DList(..), cons, append, toList, empty)
+import Data.Lens.Common
 
 import Data.Foldable (foldrM)
+import Data.Typeable (Typeable)
+import Data.Data (Data)
 import Control.Monad (forM, liftM)
 import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>))
@@ -39,6 +49,20 @@ import Control.Cond (ifM, (<||>), (<&&>), notM)
 import Data.Default (Default(..))
 import Data.Word (Word)
 
+import Prelude hiding (filter)
+import qualified Prelude as P (filter)
+
+newtype FSTree = FSTree { toTree :: Tree FilePath } deriving 
+                (Typeable, Data, Eq, Read, Show)
+
+type FSForest = [FSTree]
+
+mkFSTree :: FilePath -> FSForest -> FSTree
+mkFSTree a = FSTree . Node a . map toTree
+
+unFSTree :: FSTree -> (FilePath, FSForest) 
+unFSTree (FSTree (Node p cs)) = (p, map FSTree cs) 
+
 data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
 
 instance Default Options where
@@ -47,101 +71,117 @@ instance Default Options where
 defaultOptions :: Options
 defaultOptions = def
 
-getDirectory :: FilePath -> IO (Tree FilePath)
+class TreeLens t a | t -> a where
+  label    :: Lens t a
+  children :: Lens t [t]
+
+instance TreeLens (Tree a) a where
+  label    = lens rootLabel (\a t -> t {rootLabel = a})
+  children = lens subForest (\c t -> t {subForest = c}) 
+
+instance TreeLens FSTree FilePath where
+  label = lens (rootLabel . toTree) 
+               (\a fs -> FSTree $ (toTree fs) {rootLabel = a})
+  children = lens (map FSTree . subForest . toTree)
+                  (\c fs -> FSTree $ (toTree fs) {subForest = map toTree c})
+
+getDirectory :: FilePath -> IO FSTree
 getDirectory = getDir def
 
-getDirectory' :: FilePath -> IO (Tree FilePath)
+getDirectory' :: FilePath -> IO FSTree
 getDirectory' = getDir' def
 
-getDir :: Options -> FilePath -> IO (Tree FilePath)
+getDir :: Options -> FilePath -> IO FSTree
 getDir = getDir_ unsafeInterleaveIO
 
-getDir' :: Options -> FilePath -> IO (Tree FilePath)
+getDir' :: Options -> FilePath -> IO FSTree
 getDir' = getDir_ id
 
-getDir_ :: (IO (Tree FilePath) -> IO (Tree FilePath)) 
+getDir_ :: (IO FSTree -> IO FSTree) 
            -> Options
            -> FilePath
-           -> IO (Tree FilePath)
-getDir_ f Options {..} p = Node p <$> getChildren p
+           -> IO FSTree
+getDir_ f Options {..} p = mkFSTree p <$> getChildren p
   where getChildren path = do
-          children <- filter (`notElem` [".",".."]) 
-                      <$> getDirectoryContents path
-          forM children $ \c ->
+          cs <- P.filter (`notElem` [".",".."]) 
+                <$> getDirectoryContents path
+          forM cs $ \c ->
             let c' = path </> c
             in ifM (doesDirectoryExist c' <&&> (return followSymLinks
                                                 <||> notM (isSymLink c')))
-                   ( f . fmap (Node c) . getChildren $ c' )
-                   ( return $ Node c [] )
+                   ( f . fmap (mkFSTree c) . getChildren $ c' )
+                   ( return $ mkFSTree c [] )
 
 
-pop :: Tree FilePath -> (FilePath, Forest FilePath)
-pop (Node path children) = (path, map prepend children)
-  where prepend (Node p c) = Node (path </> p) c
+pop :: FSTree -> (FilePath, FSForest)
+pop fs = (path, map prepend cs)
+  where path = getL label fs
+        cs = getL children fs
+        prepend = modL label (path </>)
 
-pop_ :: Tree FilePath -> Forest FilePath
+pop_ :: FSTree -> FSForest
 pop_ = snd . pop
 
-flatten :: Tree FilePath -> [FilePath]
+flatten :: FSTree -> [FilePath]
 flatten = Tree.flatten . prependPaths 
 
-filterPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
-filterPaths p = fst . extractPaths p
+filter :: (FilePath -> Bool) -> FSForest -> FSForest
+filter p = fst . extract p
 
 
-findPaths :: (FilePath -> Bool) -> Forest FilePath -> Forest FilePath
-findPaths p = snd . extractPaths p
+find :: (FilePath -> Bool) -> FSForest -> FSForest
+find p = snd . extract p
 
 
-extractPaths :: (FilePath -> Bool) -> Forest FilePath 
-                -> (Forest FilePath, Forest FilePath)
-extractPaths p = runIdentity . extractPathsM (return . p)
+extract :: (FilePath -> Bool) -> FSForest
+                -> (FSForest, FSForest)
+extract p = runIdentity . extractM (return . p)
 
-filterPathsM :: Monad m =>
-                (FilePath -> m Bool) -> Forest FilePath
-                -> m (Forest FilePath)
-filterPathsM p = liftM fst . extractPathsM p
+filterM :: Monad m =>
+                (FilePath -> m Bool) -> FSForest
+                -> m FSForest
+filterM p = liftM fst . extractM p
 
-findPathsM :: Monad m =>
-              (FilePath -> m Bool) -> Forest FilePath 
-              -> m (Forest FilePath)
-findPathsM p = liftM snd . extractPathsM p
+findM :: Monad m =>
+              (FilePath -> m Bool) -> FSForest 
+              -> m FSForest
+findM p = liftM snd . extractM p
 
-extractPathsM :: Monad m => 
-                 (FilePath -> m Bool) -> Forest FilePath  
-                 -> m (Forest FilePath, Forest FilePath)
-extractPathsM p = liftM (second toList) . extractPathsM_ p
+extractM :: Monad m => 
+                 (FilePath -> m Bool) -> FSForest -> m (FSForest, FSForest)
+extractM p = liftM (second toList) . extractM_ p
 
-extractPathsM_ :: Monad m => 
-                  (FilePath -> m Bool) -> Forest FilePath 
-                  -> m (Forest FilePath, DList (Tree FilePath))
-extractPathsM_ p = foldrM extract ([], DL.empty) . map prependPaths
+extractM_ :: Monad m => 
+                  (FilePath -> m Bool) -> FSForest 
+                  -> m (FSForest, DList FSTree)
+extractM_ p = foldrM extract' ([], DL.empty) . map prependPaths
   where 
-    extract t@(Node path children) (ts, es)
+    extract' t@(Node path cs) (ts, es)
       = ifM (p path)
         ( do
-             (children', es') <- foldrM extract (ts, es) children
-             let t' = Node path children'
+             (cs', es') <- foldrM extract' (ts, es) cs
+             let t' = mkFSTree path cs'
              return (t' : ts, es' `append` es)
         )
         (
-          return (ts, t `cons` es)
+          return (ts, FSTree t `cons` es)
         )
 
 
-truncateAt :: Word -> Forest FilePath -> Forest FilePath
+truncateAt :: TreeLens t a => Word -> [t] -> [t]
 truncateAt n = mapMaybe (truncate' 0)
   where 
-    truncate' i (Node p children)
+    truncate' i t
       | i >= n = Nothing
-      | otherwise = Just . Node p . mapMaybe (truncate' (i+1)) $ children
+      | otherwise = Just . modL children (mapMaybe (truncate' (i+1))) $ t
 
 
-prependPaths :: Tree FilePath -> Tree FilePath
-prependPaths (Node root childs) = Node root (map (prepend' root) childs)
-  where 
-    prepend' parent (Node p c) = Node p' $ map (prepend' p') c
-      where p' = parent </> p
+prependPaths :: FSTree -> Tree FilePath
+prependPaths (FSTree t) = modL children (map (prepend' root)) t
+  where
+    root = rootLabel t
+    prepend' parentPath = modL label (parentPath </>) . prependChildren
+    prependChildren fs = modL children (map (prepend' (rootLabel fs))) fs
 
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p

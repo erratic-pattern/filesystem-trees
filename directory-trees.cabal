@@ -16,6 +16,7 @@ library
                  , filepath
                  , unix
                  , containers >= 0.1 && < 0.6
+                 , data-lens
                  , dlist
                  , mtl
                  , data-default
