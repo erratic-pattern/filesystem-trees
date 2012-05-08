@@ -28,6 +28,7 @@ module System.Directory.Tree
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
+import Unsafe.Coerce (unsafeCoerce)
 import System.Directory (getDirectoryContents, doesDirectoryExist)
 import System.FilePath ((</>))
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
@@ -58,10 +59,16 @@ newtype FSTree = FSTree { toTree :: Tree FilePath } deriving
 type FSForest = [FSTree]
 
 mkFSTree :: FilePath -> FSForest -> FSTree
-mkFSTree a = FSTree . Node a . map toTree
+mkFSTree a = FSTree . Node a . mapToTree
 
 unFSTree :: FSTree -> (FilePath, FSForest) 
-unFSTree (FSTree (Node p cs)) = (p, map FSTree cs) 
+unFSTree (FSTree (Node p cs)) = (p, mapFSTree cs) 
+
+mapFSTree :: Forest FilePath -> FSForest
+mapFSTree = unsafeCoerce
+
+mapToTree :: FSForest -> Forest FilePath
+mapToTree = unsafeCoerce
 
 data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
 
@@ -82,8 +89,8 @@ instance TreeLens (Tree a) a where
 instance TreeLens FSTree FilePath where
   label = lens (rootLabel . toTree) 
                (\a fs -> FSTree $ (toTree fs) {rootLabel = a})
-  children = lens (map FSTree . subForest . toTree)
-                  (\c fs -> FSTree $ (toTree fs) {subForest = map toTree c})
+  children = lens (mapFSTree . subForest . toTree)
+                  (\c fs -> FSTree $ (toTree fs) {subForest = mapToTree c})
 
 getDirectory :: FilePath -> IO FSTree
 getDirectory = getDir def
