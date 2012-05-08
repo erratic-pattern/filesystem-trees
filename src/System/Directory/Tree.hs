@@ -34,7 +34,7 @@ import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Data.Maybe (mapMaybe)
-import Control.Cond (ifM, (<||>), (<&&>))
+import Control.Cond (ifM, (<||>), (<&&>), notM)
 
 import Data.Default (Default(..))
 import Data.Word (Word)
@@ -63,15 +63,16 @@ getDir_ :: (IO (Tree FilePath) -> IO (Tree FilePath))
            -> Options
            -> FilePath
            -> IO (Tree FilePath)
-getDir_ f o@Options {..} path = Node path <$> getChildren
-  where getChildren = do
-          children <- map (path </>) . filter (`notElem` [".",".."]) 
+getDir_ f Options {..} p = Node p <$> getChildren p
+  where getChildren path = do
+          children <- filter (`notElem` [".",".."]) 
                       <$> getDirectoryContents path
           forM children $ \c ->
-            ifM (doesDirectoryExist c <&&> (return followSymLinks
-                                            <||> (not <$> isSymLink c)))
-              ( f . getDir_ f o $ c )
-              ( return $ Node c [] )
+            let c' = path </> c
+            in ifM (doesDirectoryExist c' <&&> (return followSymLinks
+                                                <||> notM (isSymLink c')))
+                   ( f . fmap (Node c) . getChildren $ c' )
+                   ( return $ Node c [] )
 
 
 pop :: Tree FilePath -> (FilePath, Forest FilePath)
@@ -126,6 +127,7 @@ extractPathsM_ p = foldrM extract ([], DL.empty) . map prependPaths
         (
           return (ts, t `cons` es)
         )
+
 
 truncateAt :: Word -> Forest FilePath -> Forest FilePath
 truncateAt n = mapMaybe (truncate' 0)
