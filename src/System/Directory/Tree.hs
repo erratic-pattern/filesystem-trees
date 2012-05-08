@@ -25,12 +25,15 @@ module System.Directory.Tree
        , extract, extractM
          -- **truncate tree to a maximum level
        , truncateAt
+         -- **Copy, move, and remove directory trees
+       , copyTo, moveTo, remove
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
 import Unsafe.Coerce (unsafeCoerce)
-import System.Directory (getDirectoryContents, doesDirectoryExist)
-import System.FilePath ((</>))
+import System.Directory (getDirectoryContents, doesDirectoryExist
+                        ,copyFile, renameFile, removeFile)
+import System.FilePath ((</>), replaceDirectory)
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 import Data.Tree (Tree(..), Forest)
 import qualified Data.Tree as Tree (flatten)
@@ -43,6 +46,7 @@ import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>))
 import Control.Arrow (second)
 import Data.Maybe (mapMaybe)
+import Data.Function (on)
 import Control.Cond (ifM, (<||>), (<&&>), notM)
 
 import Data.Default (Default(..))
@@ -113,6 +117,9 @@ getDir_ f Options {..} p = mkFSTree p <$> getChildren p
                    ( f . fmap (mkFSTree c) . getChildren $ c' )
                    ( return $ mkFSTree c [] )
 
+isSymLink :: FilePath -> IO Bool
+isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
+
 pop :: FSTree -> (FilePath, FSForest)
 pop fs = (path, map prepend cs)
   where path = getL label fs
@@ -161,7 +168,6 @@ extractM_ p = foldrM extract' ([], DL.empty) . map prependPaths
           return (ts, FSTree t `cons` es)
         )
 
-
 truncateAt :: TreeLens t a => Word -> [t] -> [t]
 truncateAt n = mapMaybe (truncate' 0)
   where 
@@ -177,5 +183,19 @@ prependPaths (FSTree t) = modL children (map (prepend' root)) t
     prepend' parentPath = modL label (parentPath </>) . prependChildren
     prependChildren fs = modL children (map (prepend' (rootLabel fs))) fs
 
-isSymLink :: FilePath -> IO Bool
-isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
+
+copyTo :: FilePath -> FSTree -> IO FSTree
+copyTo = zipWithDestM copyFile
+
+moveTo :: FilePath -> FSTree ->  IO FSTree
+moveTo = zipWithDestM renameFile
+
+remove :: FSTree -> IO ()
+remove = mapM_ removeFile . flatten
+
+zipWithDestM :: Monad m => 
+                (FilePath -> FilePath -> m ()) -> FilePath -> FSTree -> m FSTree
+zipWithDestM f dest fs = do 
+  sequence_ $ (zipWith f `on` flatten) fs destFs
+  return destFs
+  where destFs = modL label (`replaceDirectory` dest) fs
