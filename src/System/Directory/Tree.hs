@@ -35,11 +35,9 @@ import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 import Data.Tree (Tree(..), Forest)
 import qualified Data.Tree as Tree (flatten)
 import Data.DList as DL (DList(..), cons, append, toList, empty)
-import Data.Lens.Common
+import Data.Lens.Common (Lens, lens, getL, modL)
 
 import Data.Foldable (foldrM)
-import Data.Typeable (Typeable)
-import Data.Data (Data)
 import Control.Monad (forM, liftM)
 import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>))
@@ -49,6 +47,8 @@ import Control.Cond (ifM, (<||>), (<&&>), notM)
 
 import Data.Default (Default(..))
 import Data.Word (Word)
+import Data.Typeable (Typeable)
+import Data.Data (Data)
 
 import Prelude hiding (filter)
 import qualified Prelude as P (filter)
@@ -69,14 +69,6 @@ mapFSTree = unsafeCoerce
 
 mapToTree :: FSForest -> Forest FilePath
 mapToTree = unsafeCoerce
-
-data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
-
-instance Default Options where
-  def = defaultOptions
-
-defaultOptions :: Options
-defaultOptions = Options { followSymLinks = False }
 
 class TreeLens t a | t -> a where
   label    :: Lens t a
@@ -104,6 +96,14 @@ getDir = getDir_ unsafeInterleaveIO
 getDir' :: Options -> FilePath -> IO FSTree
 getDir' = getDir_ id
 
+data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
+
+instance Default Options where
+  def = defaultOptions
+
+defaultOptions :: Options
+defaultOptions = Options { followSymLinks = False }
+
 getDir_ :: (IO FSTree -> IO FSTree) 
            -> Options
            -> FilePath
@@ -118,7 +118,6 @@ getDir_ f Options {..} p = mkFSTree p <$> getChildren p
                                                 <||> notM (isSymLink c')))
                    ( f . fmap (mkFSTree c) . getChildren $ c' )
                    ( return $ mkFSTree c [] )
-
 
 pop :: FSTree -> (FilePath, FSForest)
 pop fs = (path, map prepend cs)
@@ -139,28 +138,23 @@ filter p = fst . extract p
 find :: (FilePath -> Bool) -> FSForest -> FSForest
 find p = snd . extract p
 
-
-extract :: (FilePath -> Bool) -> FSForest
-                -> (FSForest, FSForest)
+extract :: (FilePath -> Bool) -> FSForest -> (FSForest, FSForest)
 extract p = runIdentity . extractM (return . p)
 
 filterM :: Monad m =>
-                (FilePath -> m Bool) -> FSForest
-                -> m FSForest
+           (FilePath -> m Bool) -> FSForest -> m FSForest
 filterM p = liftM fst . extractM p
 
 findM :: Monad m =>
-              (FilePath -> m Bool) -> FSForest 
-              -> m FSForest
+         (FilePath -> m Bool) -> FSForest -> m FSForest
 findM p = liftM snd . extractM p
 
 extractM :: Monad m => 
-                 (FilePath -> m Bool) -> FSForest -> m (FSForest, FSForest)
+            (FilePath -> m Bool) -> FSForest -> m (FSForest, FSForest)
 extractM p = liftM (second toList) . extractM_ p
 
 extractM_ :: Monad m => 
-                  (FilePath -> m Bool) -> FSForest 
-                  -> m (FSForest, DList FSTree)
+             (FilePath -> m Bool) -> FSForest -> m (FSForest, DList FSTree)
 extractM_ p = foldrM extract' ([], DL.empty) . map prependPaths
   where 
     extract' t@(Node path cs) (ts, es)
