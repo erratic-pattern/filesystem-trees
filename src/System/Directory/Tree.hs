@@ -4,7 +4,7 @@
   #-}
 module System.Directory.Tree
        ( -- *Directory tree structure
-         FSTree(..), FSForest, mkFSTree, unFSTree
+         FSTree(..), FSForest, mkFSTree
          -- *Generic rose trees 
          -- |Re-exported from "Data.Tree"
        , Tree(..), Forest
@@ -61,9 +61,6 @@ type FSForest = [FSTree]
 mkFSTree :: FilePath -> FSForest -> FSTree
 mkFSTree a = FSTree . Node a . mapToTree
 
-unFSTree :: FSTree -> (FilePath, FSForest) 
-unFSTree (FSTree (Node p cs)) = (p, mapFSTree cs) 
-
 mapFSTree :: Forest FilePath -> FSForest
 mapFSTree = unsafeCoerce
 
@@ -104,10 +101,7 @@ instance Default Options where
 defaultOptions :: Options
 defaultOptions = Options { followSymLinks = False }
 
-getDir_ :: (IO FSTree -> IO FSTree) 
-           -> Options
-           -> FilePath
-           -> IO FSTree
+getDir_ :: (IO FSTree -> IO FSTree) -> Options -> FilePath -> IO FSTree
 getDir_ f Options {..} p = mkFSTree p <$> getChildren p
   where getChildren path = do
           cs <- P.filter (`notElem` [".",".."]) 
@@ -133,7 +127,6 @@ flatten = Tree.flatten . prependPaths
 
 filter :: (FilePath -> Bool) -> FSForest -> FSForest
 filter p = fst . extract p
-
 
 find :: (FilePath -> Bool) -> FSForest -> FSForest
 find p = snd . extract p
