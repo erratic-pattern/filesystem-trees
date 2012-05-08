@@ -73,10 +73,10 @@ mapToTree = unsafeCoerce
 data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
 
 instance Default Options where
-  def = Options { followSymLinks = False }
+  def = defaultOptions
 
 defaultOptions :: Options
-defaultOptions = def
+defaultOptions = Options { followSymLinks = False }
 
 class TreeLens t a | t -> a where
   label    :: Lens t a
@@ -93,10 +93,10 @@ instance TreeLens FSTree FilePath where
                   (\c fs -> FSTree $ (toTree fs) {subForest = mapToTree c})
 
 getDirectory :: FilePath -> IO FSTree
-getDirectory = getDir def
+getDirectory = getDir defaultOptions
 
 getDirectory' :: FilePath -> IO FSTree
-getDirectory' = getDir' def
+getDirectory' = getDir' defaultOptions
 
 getDir :: Options -> FilePath -> IO FSTree
 getDir = getDir_ unsafeInterleaveIO
