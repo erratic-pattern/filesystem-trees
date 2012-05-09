@@ -2,7 +2,7 @@
              FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies, 
              TypeSynonymInstances
   #-}
-module System.Directory.Tree
+module System.File.Tree
        ( -- *Directory tree structure
          FSTree(..), FSForest, mkFSTree
          -- *Generic rose trees 
