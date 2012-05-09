@@ -20,13 +20,19 @@ module System.Directory.Tree
          -- **filter subtrees
        , filter, filterM
          -- ***Useful predicates
-       , isSymLink, isDir
+       , isSymLink, isSymDir, isSymFile, isDir
          -- **extract subtrees
        , extract, extractM
          -- **truncate tree to a maximum level
        , truncateAt
-         -- **Copy, move, and remove directory trees
-       , copyTo, copyTo_,  moveTo, moveTo_, mergeInto, mergeInto_,  remove
+         -- **IO operations on directory trees
+         -- ***copying
+       , copyTo, copyTo_
+         -- ***moving
+       , moveTo, moveTo_
+       , mergeInto, mergeInto_
+         -- ***removing
+       , remove, tryRemoveWith, removeEmptyDirectories
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
@@ -42,7 +48,7 @@ import Data.Tree (Tree(..), Forest)
 import qualified Data.Tree as Tree (flatten)
 import Data.DList as DL (DList(..), cons, append, toList, empty, concat, snoc)
 
-import Control.Exception (catch, IOException)
+import Control.Exception (throwIO, catch, IOException)
 import Control.Monad (forM, liftM, void)
 import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>), (<*))
@@ -60,11 +66,50 @@ import Data.Data (Data)
 import Prelude hiding (filter, catch)
 import qualified Prelude as P (filter)
 
+-- |A representation of a filesystem tree. The root label contains the
+-- path context, and every child node is a single file/directory name.
+--
+-- For example, say we have the following directory structure on our
+-- filesystem:
+--
+-- @ 
+--   /example$ tree foo --charset ASCII
+--   foo
+--   `-- bar
+--       `-- test
+--           |-- a
+--           |-- A
+--           |   |-- x
+--           |   `-- y
+--           |-- b
+--           `-- B
+-- @
+--
+-- then calling 'getDirectory' \"\/example\/foo\/bar\/test\" will yield a FSTree with
+-- the following structure:
+-- 
+-- >  /example$ ghci
+-- >  Prelude Data.Tree System.Directory.Tree> putStrLn . drawTree . toTree =<< getDirectory "/example/foo/bar/test"
+-- >  /example/foo/bar/test
+-- >  |
+-- >  +- A
+-- >  |  |
+-- >  |  +- x
+-- >  |  |
+-- >  |  `- y
+-- >  |
+-- >  +- B
+-- >  |
+-- >  +- a
+-- >  |
+-- >  `- b
+
 newtype FSTree = FSTree { toTree :: Tree FilePath } deriving 
                 (Typeable, Data, Eq, Read, Show)
 
 type FSForest = [FSTree]
 
+-- |Pseudo-constructor for 'FSTree'
 mkFSTree :: FilePath -> FSForest -> FSTree
 mkFSTree a = FSTree . Node a . mapToTree
 
@@ -74,6 +119,7 @@ mapFSTree = unsafeCoerce
 mapToTree :: FSForest -> Forest FilePath
 mapToTree = unsafeCoerce
 
+-- |Overloaded lenses for 'Tree' and 'FSTree'
 class TreeLens t a | t -> a where
   label    :: Lens t a
   children :: Lens t [t]
@@ -108,6 +154,14 @@ getDir_ f p = mkFSTree p <$> getChildren p
 -- |Checks if a path refers to a symbolic link
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
+
+-- |Checks if a path refers to a symbolically linked directory 
+isSymDir :: FilePath -> IO Bool
+isSymDir p = doesDirectoryExist p <&&> isSymLink p
+
+-- |Checks if a path refers to a symbolically linked file
+isSymFile :: FilePath -> IO Bool
+isSymFile p = notM (doesDirectoryExist p) <&&> isSymLink p
 
 -- |Checks if a path refers to a real directory (not a symbolic link)
 isDir :: FilePath -> IO Bool
@@ -210,12 +264,17 @@ mergeInto_ :: FilePath -> FSTree -> IO ()
 mergeInto_ = (void .) . mergeInto
 
 remove :: FSTree -> IO ()
-remove = remove' . prependPaths
+remove = tryRemoveWith throwIO
+
+tryRemoveWith :: (IOException -> IO ()) -> FSTree -> IO ()
+tryRemoveWith handler = remove' . prependPaths
   where remove' (Node p cs) = do
           mapM_ remove' cs
           ifM (doesDirectoryExist p)
               (removeDirectory p)
               (removeFile p)
+              `catch` handler
+            
 
 removeEmptyDirectories :: FSTree -> IO ()
 removeEmptyDirectories = mapM_ tryRemoveDirectory . flattenPostOrder
