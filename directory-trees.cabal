@@ -21,6 +21,5 @@ library
                  , data-lens
                  , dlist
                  , mtl
-                 , data-default
                  , cond == 0.0.*
   exposed-modules: System.Directory.Tree

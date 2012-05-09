@@ -11,50 +11,53 @@ module System.Directory.Tree
          -- * Overloaded tree lenses
        , TreeLens(..)
          -- *Retrieve directory trees from the filesystem
-       , getDir, getDir'
        , getDirectory, getDirectory'
-       , Options(..), defaultOptions
          -- * Operations on directory trees
          -- **basic operations
-       , pop, pop_, flatten
+       , pop, pop_, flatten, flattenPostOrder
          -- **find subtrees
        , find, findM
          -- **filter subtrees
        , filter, filterM
+         -- ***Useful predicates
+       , isSymLink, isDir
          -- **extract subtrees
        , extract, extractM
          -- **truncate tree to a maximum level
        , truncateAt
          -- **Copy, move, and remove directory trees
-       , copyTo, moveTo, remove
+       , copyTo, copyTo_,  moveTo, moveTo_, mergeInto, mergeInto_,  remove
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
 import Unsafe.Coerce (unsafeCoerce)
-import System.Directory (getDirectoryContents, doesDirectoryExist
-                        ,copyFile, renameFile, removeFile)
-import System.FilePath ((</>), replaceDirectory)
+
+import System.Directory (getDirectoryContents, doesDirectoryExist, copyFile, 
+                         renameFile, removeFile, createDirectory, 
+                         createDirectoryIfMissing, removeDirectory)
+import System.FilePath ((</>))
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
+
 import Data.Tree (Tree(..), Forest)
 import qualified Data.Tree as Tree (flatten)
-import Data.DList as DL (DList(..), cons, append, toList, empty)
-import Data.Lens.Common (Lens, lens, getL, modL)
+import Data.DList as DL (DList(..), cons, append, toList, empty, concat, snoc)
 
-import Data.Foldable (foldrM)
-import Control.Monad (forM, liftM)
+import Control.Exception (catch, IOException)
+import Control.Monad (forM, liftM, void)
 import Control.Monad.Identity (runIdentity)
-import Control.Applicative ((<$>))
+import Control.Applicative ((<$>), (<*))
 import Control.Arrow (second)
+import Data.Foldable (foldrM)
 import Data.Maybe (mapMaybe)
 import Data.Function (on)
-import Control.Cond (ifM, (<||>), (<&&>), notM)
+import Data.Lens.Common (Lens, lens, getL, setL, modL)
+import Control.Cond (ifM, (<&&>), notM, whenM)
 
-import Data.Default (Default(..))
 import Data.Word (Word)
 import Data.Typeable (Typeable)
 import Data.Data (Data)
 
-import Prelude hiding (filter)
+import Prelude hiding (filter, catch)
 import qualified Prelude as P (filter)
 
 newtype FSTree = FSTree { toTree :: Tree FilePath } deriving 
@@ -86,39 +89,29 @@ instance TreeLens FSTree FilePath where
                   (\c fs -> FSTree $ (toTree fs) {subForest = mapToTree c})
 
 getDirectory :: FilePath -> IO FSTree
-getDirectory = getDir defaultOptions
+getDirectory = getDir_ unsafeInterleaveIO
 
 getDirectory' :: FilePath -> IO FSTree
-getDirectory' = getDir' defaultOptions
+getDirectory' = getDir_ id
 
-getDir :: Options -> FilePath -> IO FSTree
-getDir = getDir_ unsafeInterleaveIO
-
-getDir' :: Options -> FilePath -> IO FSTree
-getDir' = getDir_ id
-
-data Options = Options { followSymLinks :: Bool } deriving (Eq, Show)
-
-instance Default Options where
-  def = defaultOptions
-
-defaultOptions :: Options
-defaultOptions = Options { followSymLinks = False }
-
-getDir_ :: (IO FSTree -> IO FSTree) -> Options -> FilePath -> IO FSTree
-getDir_ f Options {..} p = mkFSTree p <$> getChildren p
+getDir_ :: (IO FSTree -> IO FSTree) -> FilePath -> IO FSTree
+getDir_ f p = mkFSTree p <$> getChildren p
   where getChildren path = do
           cs <- P.filter (`notElem` [".",".."]) 
                 <$> getDirectoryContents path
           forM cs $ \c ->
             let c' = path </> c
-            in ifM (doesDirectoryExist c' <&&> (return followSymLinks
-                                                <||> notM (isSymLink c')))
+            in ifM (isDir c')
                    ( f . fmap (mkFSTree c) . getChildren $ c' )
                    ( return $ mkFSTree c [] )
 
+-- |Checks if a path refers to a symbolic link
 isSymLink :: FilePath -> IO Bool
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
+
+-- |Checks if a path refers to a real directory (not a symbolic link)
+isDir :: FilePath -> IO Bool
+isDir p = doesDirectoryExist p <&&> notM (isSymLink p)
 
 pop :: FSTree -> (FilePath, FSForest)
 pop fs = (path, map prepend cs)
@@ -131,6 +124,10 @@ pop_ = snd . pop
 
 flatten :: FSTree -> [FilePath]
 flatten = Tree.flatten . prependPaths 
+
+flattenPostOrder :: FSTree -> [FilePath]
+flattenPostOrder = toList . flatten' . prependPaths
+  where flatten' (Node p cs) = DL.concat (map flatten' cs) `snoc` p  
 
 filter :: (FilePath -> Bool) -> FSForest -> FSForest
 filter p = fst . extract p
@@ -177,25 +174,66 @@ truncateAt n = mapMaybe (truncate' 0)
 
 
 prependPaths :: FSTree -> Tree FilePath
-prependPaths (FSTree t) = modL children (map (prepend' root)) t
+prependPaths (FSTree root) = modL children (map (prepend' rootPath)) root
   where
-    root = rootLabel t
-    prepend' parentPath = modL label (parentPath </>) . prependChildren
+    rootPath = rootLabel root
+    prepend' parentPath = prependChildren . modL label (parentPath </>)
     prependChildren fs = modL children (map (prepend' (rootLabel fs))) fs
 
-
 copyTo :: FilePath -> FSTree -> IO FSTree
-copyTo = zipWithDestM copyFile
+copyTo = zipWithDestM (const $ createDirectoryIfMissing False) copyFile
+
+copyTo_ :: FilePath -> FSTree -> IO ()
+copyTo_ = (void .) . copyTo
 
 moveTo :: FilePath -> FSTree ->  IO FSTree
-moveTo = zipWithDestM renameFile
+moveTo dest fs = do
+  whenM (isDir dest) $ remove =<< getDirectory dest
+  zipWithDestM 
+    (\s d -> do tryRemoveDirectory s
+                createDirectory d)
+    renameFile 
+    dest fs
+    <* removeEmptyDirectories fs
+
+moveTo_ :: FilePath -> FSTree -> IO ()
+moveTo_ = (void .) . moveTo
+
+mergeInto :: FilePath -> FSTree -> IO FSTree
+mergeInto dest fs = zipWithDestM 
+                    (\_ d -> createDirectoryIfMissing False d) 
+                    renameFile
+                    dest fs
+                    <* removeEmptyDirectories fs
+  
+mergeInto_ :: FilePath -> FSTree -> IO ()
+mergeInto_ = (void .) . mergeInto
 
 remove :: FSTree -> IO ()
-remove = mapM_ removeFile . flatten
+remove = remove' . prependPaths
+  where remove' (Node p cs) = do
+          mapM_ remove' cs
+          ifM (doesDirectoryExist p)
+              (removeDirectory p)
+              (removeFile p)
 
-zipWithDestM :: Monad m => 
-                (FilePath -> FilePath -> m ()) -> FilePath -> FSTree -> m FSTree
-zipWithDestM f dest fs = do 
+removeEmptyDirectories :: FSTree -> IO ()
+removeEmptyDirectories = mapM_ tryRemoveDirectory . flattenPostOrder
+
+tryRemoveDirectory :: FilePath -> IO ()
+tryRemoveDirectory path = removeDirectory path `catch` handler
+  where handler :: IOException -> IO () 
+        handler = const (return ())
+
+zipWithDestM :: (FilePath -> FilePath -> IO ())
+                -> (FilePath -> FilePath -> IO ())
+                -> FilePath -> FSTree
+                -> IO FSTree
+zipWithDestM dirF fileF rootDest  fs = do 
   sequence_ $ (zipWith f `on` flatten) fs destFs
   return destFs
-  where destFs = modL label (`replaceDirectory` dest) fs
+  where
+    destFs = setL label rootDest fs
+    f src dest = ifM (isDir src)
+                     (dirF src dest)
+                     (fileF src dest)
