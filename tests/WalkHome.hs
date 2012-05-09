@@ -1,5 +1,5 @@
 import System.Directory
-import System.Directory.Tree
+import System.File.Tree
 import Data.Tree
 import Data.String
 import Data.Foldable
