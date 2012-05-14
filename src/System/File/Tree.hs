@@ -36,7 +36,7 @@ module System.File.Tree
        , moveTo, moveTo_
        , mergeInto, mergeInto_
          -- ***removing
-       , remove, tryRemoveWith, removeEmptyDirectories
+       , remove, tryRemove, tryRemoveWith, removeEmptyDirectories
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
@@ -55,11 +55,11 @@ import Data.DList as DL (DList(..), cons, append, toList, empty, concat, snoc)
 import Control.Exception (throwIO, catch, IOException)
 import Control.Monad (forM, liftM, liftM2, void)
 import Control.Monad.Identity (runIdentity)
-import Control.Applicative ((<$>), (<*))
+import Control.Applicative ((<$>), (<*>), (<*))
 import Control.Arrow (second)
 import Data.Foldable (foldrM)
 import qualified Data.Traversable as T (mapM)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, catMaybes)
 import Data.Function (on)
 import Data.Lens.Common (Lens, lens, getL, setL, modL)
 import Control.Cond (ifM, (<&&>), notM, whenM)
@@ -285,16 +285,19 @@ mergeInto_ :: FilePath -> FSTree -> IO ()
 mergeInto_ = (void .) . mergeInto
 
 remove :: FSTree -> IO ()
-remove = tryRemoveWith throwIO
+remove = void . tryRemoveWith throwIO
 
-tryRemoveWith :: (IOException -> IO ()) -> FSTree -> IO ()
-tryRemoveWith handler = remove' . prependPaths
-  where remove' (Node p cs) = do
-          P.mapM_ remove' cs
-          ifM (doesDirectoryExist p)
-              (removeDirectory p)
-              (removeFile p)
-              `catch` handler
+tryRemove :: FSTree -> IO [IOException]
+tryRemove = tryRemoveWith return
+
+tryRemoveWith :: (IOException -> IO a) -> FSTree -> IO [a]
+tryRemoveWith handler = fmap (catMaybes . DL.toList) . remove' . prependPaths
+  where remove' (Node p cs) =
+          DL.snoc   <$> (fmap DL.concat . P.mapM remove' $ cs)
+                    <*> ifM (doesDirectoryExist p)
+                            (removeDirectory p >> return Nothing)
+                            (removeFile p      >> return Nothing)
+                            `catch` (fmap Just . handler)
             
 
 removeEmptyDirectories :: FSTree -> IO ()
