@@ -15,6 +15,8 @@ module System.File.Tree
          -- * Operations on directory trees
          -- **basic operations
        , pop, pop_, flatten, flattenPostOrder
+         -- ** mapping over subtrees
+       , map, mapM, mapM_
          -- **find subtrees
        , find, findM
          -- **filter subtrees
@@ -25,6 +27,8 @@ module System.File.Tree
        , extract, extractM
          -- **truncate tree to a maximum level
        , truncateAt
+         -- **zip with destination tree
+       , zipWithDest, zipWithDestM, zipWithDestM_
          -- **IO operations on directory trees
          -- ***copying
        , copyTo, copyTo_
@@ -49,11 +53,12 @@ import qualified Data.Tree as Tree (flatten)
 import Data.DList as DL (DList(..), cons, append, toList, empty, concat, snoc)
 
 import Control.Exception (throwIO, catch, IOException)
-import Control.Monad (forM, liftM, void)
+import Control.Monad (forM, liftM, liftM2, void)
 import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>), (<*))
 import Control.Arrow (second)
 import Data.Foldable (foldrM)
+import qualified Data.Traversable as T (mapM)
 import Data.Maybe (mapMaybe)
 import Data.Function (on)
 import Data.Lens.Common (Lens, lens, getL, setL, modL)
@@ -63,8 +68,8 @@ import Data.Word (Word)
 import Data.Typeable (Typeable)
 import Data.Data (Data)
 
-import Prelude hiding (filter, catch)
-import qualified Prelude as P (filter)
+import Prelude hiding (filter, catch, map, mapM, mapM_)
+import qualified Prelude as P
 
 -- |A representation of a filesystem tree. The root label contains the
 -- path context, and every child node is a single file/directory name.
@@ -168,7 +173,7 @@ isDir :: FilePath -> IO Bool
 isDir p = doesDirectoryExist p <&&> notM (isSymLink p)
 
 pop :: FSTree -> (FilePath, FSForest)
-pop fs = (path, map prepend cs)
+pop fs = (path, P.map prepend cs)
   where path = getL label fs
         cs = getL children fs
         prepend = modL label (path </>)
@@ -181,7 +186,16 @@ flatten = Tree.flatten . prependPaths
 
 flattenPostOrder :: FSTree -> [FilePath]
 flattenPostOrder = toList . flatten' . prependPaths
-  where flatten' (Node p cs) = DL.concat (map flatten' cs) `snoc` p  
+  where flatten' (Node p cs) = DL.concat (P.map flatten' cs) `snoc` p  
+
+map :: (FilePath -> b) -> FSTree -> Tree b
+map f = fmap f . toTree
+
+mapM :: Monad m => (FilePath -> m b) -> FSTree -> m (Tree b)
+mapM f = T.mapM f . toTree
+
+mapM_ :: Monad m => (FilePath -> m b) -> FSTree -> m () 
+mapM_ f t = mapM f t >> return ()
 
 filter :: (FilePath -> Bool) -> FSForest -> FSForest
 filter p = fst . extract p
@@ -206,7 +220,7 @@ extractM p = liftM (second toList) . extractM_ p
 
 extractM_ :: Monad m => 
              (FilePath -> m Bool) -> FSForest -> m (FSForest, DList FSTree)
-extractM_ p = foldrM extract' ([], DL.empty) . map prependPaths
+extractM_ p = foldrM extract' ([], DL.empty) . P.map prependPaths
   where 
     extract' t@(Node path cs) (ts, es)
       = ifM (p path)
@@ -228,14 +242,16 @@ truncateAt n = mapMaybe (truncate' 0)
 
 
 prependPaths :: FSTree -> Tree FilePath
-prependPaths (FSTree root) = modL children (map (prepend' rootPath)) root
+prependPaths (FSTree root) = modL children (P.map (prepend' rootPath)) root
   where
     rootPath = rootLabel root
     prepend' parentPath = prependChildren . modL label (parentPath </>)
-    prependChildren fs = modL children (map (prepend' (rootLabel fs))) fs
+    prependChildren fs = modL children (P.map (prepend' (rootLabel fs))) fs
 
 copyTo :: FilePath -> FSTree -> IO FSTree
-copyTo = zipWithDestM (const $ createDirectoryIfMissing False) copyFile
+copyTo = zipWithDestM_ $ \src dest ->ifM (isDir src)
+                                     (createDirectoryIfMissing False dest) 
+                                     (copyFile src dest)
 
 copyTo_ :: FilePath -> FSTree -> IO ()
 copyTo_ = (void .) . copyTo
@@ -243,10 +259,13 @@ copyTo_ = (void .) . copyTo
 moveTo :: FilePath -> FSTree ->  IO FSTree
 moveTo dest fs = do
   whenM (isDir dest) $ remove =<< getDirectory dest
-  zipWithDestM 
-    (\s d -> do tryRemoveDirectory s
-                createDirectory d)
-    renameFile 
+  zipWithDestM_
+    (\s d -> ifM (isDir s) 
+             (do tryRemoveDirectory s
+                 createDirectory d)
+             
+             (renameFile s d)
+    )
     dest fs
     <* removeEmptyDirectories fs
 
@@ -254,9 +273,11 @@ moveTo_ :: FilePath -> FSTree -> IO ()
 moveTo_ = (void .) . moveTo
 
 mergeInto :: FilePath -> FSTree -> IO FSTree
-mergeInto dest fs = zipWithDestM 
-                    (\_ d -> createDirectoryIfMissing False d) 
-                    renameFile
+mergeInto dest fs = zipWithDestM_ 
+                    (\s d -> ifM (isDir s) 
+                                 (createDirectoryIfMissing False d) 
+                                 (renameFile s d)
+                    )
                     dest fs
                     <* removeEmptyDirectories fs
   
@@ -269,7 +290,7 @@ remove = tryRemoveWith throwIO
 tryRemoveWith :: (IOException -> IO ()) -> FSTree -> IO ()
 tryRemoveWith handler = remove' . prependPaths
   where remove' (Node p cs) = do
-          mapM_ remove' cs
+          P.mapM_ remove' cs
           ifM (doesDirectoryExist p)
               (removeDirectory p)
               (removeFile p)
@@ -277,22 +298,35 @@ tryRemoveWith handler = remove' . prependPaths
             
 
 removeEmptyDirectories :: FSTree -> IO ()
-removeEmptyDirectories = mapM_ tryRemoveDirectory . flattenPostOrder
+removeEmptyDirectories = P.mapM_ tryRemoveDirectory . flattenPostOrder
 
 tryRemoveDirectory :: FilePath -> IO ()
 tryRemoveDirectory path = removeDirectory path `catch` handler
   where handler :: IOException -> IO () 
         handler = const (return ())
 
-zipWithDestM :: (FilePath -> FilePath -> IO ())
-                -> (FilePath -> FilePath -> IO ())
+zipWithDest :: (FilePath -> FilePath -> a)
+               -> FilePath -> FSTree
+               -> [a]
+zipWithDest f dest fs = runIdentity $ zipWithDestM ((return .) . f) dest fs 
+
+zipWithDestM :: Monad m => (FilePath -> FilePath -> m a)
                 -> FilePath -> FSTree
-                -> IO FSTree
-zipWithDestM dirF fileF rootDest  fs = do 
-  sequence_ $ (zipWith f `on` flatten) fs destFs
-  return destFs
+                -> m [a]
+zipWithDestM f dest fs = liftM fst $ zipWithDestM__ f dest fs
+
+zipWithDestM_ :: Monad m => 
+                 (FilePath -> FilePath -> m a)
+                -> FilePath -> FSTree
+                -> m FSTree
+zipWithDestM_ f dest fs = liftM snd $ zipWithDestM__ f dest fs
+
+zipWithDestM__ :: Monad m =>
+                  (FilePath -> FilePath -> m a)
+                  -> FilePath -> FSTree
+                  -> m ([a], FSTree)
+zipWithDestM__ f rootDest  fs =
+  liftM2 (,) (sequence $ (zipWith f `on` flatten) fs destFs)
+             (return destFs)
   where
     destFs = setL label rootDest fs
-    f src dest = ifM (isDir src)
-                     (dirF src dest)
-                     (fileF src dest)
