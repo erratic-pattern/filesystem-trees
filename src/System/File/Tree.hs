@@ -1,10 +1,10 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, RecordWildCards, DeriveDataTypeable, 
-             FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies, 
-             TypeSynonymInstances
+{-# LANGUAGE GeneralizedNewtypeDeriving, DeriveDataTypeable, 
+             FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies,
+             TypeSynonymInstances, RankNTypes
   #-}
 module System.File.Tree
        ( -- *Directory tree structure
-         FSTree(..), FSForest, mkFSTree
+         FSTree(..), mkFSTree, FSForest
          -- *Generic rose trees 
          -- |Re-exported from "Data.Tree"
        , Tree(..), Forest
@@ -12,39 +12,40 @@ module System.File.Tree
        , TreeLens(..)
          -- *Retrieve directory trees from the filesystem
        , getDirectory, getDirectory'
+         -- **IO operations on directory trees
+         -- ***copy
+       , copyTo, copyTo_
+         -- ***move
+       , moveTo, moveTo_
+       , mergeInto, mergeInto_
+         -- ***remove
+       , remove, tryRemove, tryRemoveWith              
          -- * Operations on directory trees
          -- **basic operations
        , pop, pop_, flatten, flattenPostOrder
-         -- ** mapping over subtrees
+         -- ** map over subtrees
        , map, mapM, mapM_
          -- **find subtrees
        , find, findM
          -- **filter subtrees
        , filter, filterM
-         -- ***Useful predicates
-       , isSymLink, isSymDir, isSymFile, isDir
+         -- ***useful predicates
+       , isFile, isDir, isSymLink, isSymDir, isSymFile, isRealFile, isRealDir
          -- **extract subtrees
        , extract, extractM
          -- **truncate tree to a maximum level
        , truncateAt
          -- **zip with destination tree
        , zipWithDest, zipWithDestM, zipWithDestM_
-         -- **IO operations on directory trees
-         -- ***copying
-       , copyTo, copyTo_
-         -- ***moving
-       , moveTo, moveTo_
-       , mergeInto, mergeInto_
-         -- ***removing
-       , remove, tryRemove, tryRemoveWith, removeEmptyDirectories
        )where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
 import Unsafe.Coerce (unsafeCoerce)
 
-import System.Directory (getDirectoryContents, doesDirectoryExist, copyFile, 
-                         renameFile, removeFile, createDirectory, 
-                         createDirectoryIfMissing, removeDirectory)
+import System.Directory (getDirectoryContents, doesDirectoryExist, doesFileExist, 
+                         copyFile, renameFile, removeFile, createDirectory,
+                         createDirectoryIfMissing, removeDirectory,
+                         removeDirectoryRecursive)
 import System.FilePath ((</>))
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 
@@ -62,7 +63,7 @@ import qualified Data.Traversable as T (mapM)
 import Data.Maybe (mapMaybe, catMaybes)
 import Data.Function (on)
 import Data.Lens.Common (Lens, lens, getL, setL, modL)
-import Control.Conditional (ifM, (<&&>), notM, whenM)
+import Control.Conditional (ifM, (<&&>), (<||>), notM, condM, otherwiseM)
 
 import Data.Word (Word)
 import Data.Typeable (Typeable)
@@ -108,13 +109,12 @@ import qualified Prelude as P
 -- >  +- a
 -- >  |
 -- >  `- b
-
 newtype FSTree = FSTree { toTree :: Tree FilePath } deriving 
                 (Typeable, Data, Eq, Read, Show)
 
 type FSForest = [FSTree]
 
--- |Pseudo-constructor for 'FSTree'
+-- |A pseudo-constructor for 'FSTree'.
 mkFSTree :: FilePath -> FSForest -> FSTree
 mkFSTree a = FSTree . Node a . mapToTree
 
@@ -126,7 +126,9 @@ mapToTree = unsafeCoerce
 
 -- |Overloaded lenses for 'Tree' and 'FSTree'
 class TreeLens t a | t -> a where
+  -- |Lens for the value at a tree node
   label    :: Lens t a
+  -- |Lens for a list of children nodes
   children :: Lens t [t]
 
 instance TreeLens (Tree a) a where
@@ -139,22 +141,41 @@ instance TreeLens FSTree FilePath where
   children = lens (mapFSTree . subForest . toTree)
                   (\c fs -> FSTree $ (toTree fs) {subForest = mapToTree c})
 
+-- |Lazily retrieves a representation of a directory and its contents recursively.
+--
+-- Relative paths are not converted to absolute. Thus, a FSTree formed from a 
+-- relative path will contain a \"relative tree\", and the usual caveats of
+-- current directories and relative paths apply to the tree as a whole.
 getDirectory :: FilePath -> IO FSTree
 getDirectory = getDir_ unsafeInterleaveIO
 
+-- |A strict variant of 'getDirectory'. 
+--
+-- Though race conditionals are still a possibility, this function will avoid some 
+-- race conditions that could be caused from the use of lazy IO. For large 
+-- directories, this function can easily cause memory leaks.
 getDirectory' :: FilePath -> IO FSTree
 getDirectory' = getDir_ id
 
-getDir_ :: (IO FSTree -> IO FSTree) -> FilePath -> IO FSTree
+getDir_ :: (forall a. IO a -> IO a) -> FilePath -> IO FSTree
 getDir_ f p = mkFSTree p <$> getChildren p
   where getChildren path = do
           cs <- P.filter (`notElem` [".",".."]) 
-                <$> getDirectoryContents path
+                <$> f (getDirectoryContents path)
           forM cs $ \c ->
             let c' = path </> c
-            in ifM (isDir c')
+            in ifM (isRealDir c')
                    ( f . fmap (mkFSTree c) . getChildren $ c' )
                    ( return $ mkFSTree c [] )
+
+
+-- |Checks if a path refers to a file.
+isFile :: FilePath -> IO Bool
+isFile = doesFileExist
+
+-- |Checks if a path refer to a directory.
+isDir :: FilePath -> IO Bool
+isDir = doesDirectoryExist
 
 -- |Checks if a path refers to a symbolic link
 isSymLink :: FilePath -> IO Bool
@@ -162,58 +183,86 @@ isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
 
 -- |Checks if a path refers to a symbolically linked directory 
 isSymDir :: FilePath -> IO Bool
-isSymDir p = doesDirectoryExist p <&&> isSymLink p
+isSymDir p = isDir p <&&> isSymLink p
 
 -- |Checks if a path refers to a symbolically linked file
 isSymFile :: FilePath -> IO Bool
-isSymFile p = notM (doesDirectoryExist p) <&&> isSymLink p
+isSymFile p = isFile p <&&> isSymLink p
 
 -- |Checks if a path refers to a real directory (not a symbolic link)
-isDir :: FilePath -> IO Bool
-isDir p = doesDirectoryExist p <&&> notM (isSymLink p)
+isRealDir :: FilePath -> IO Bool
+isRealDir p = isDir p <&&> notM (isSymLink p)
 
+-- |Checks if a path refers to a real file (not a symbolic link)
+isRealFile :: FilePath -> IO Bool
+isRealFile p = isFile p <&&> notM (isSymLink p)
+
+-- |Remove the root node of a filesystem tree, while preserving the paths of
+-- its children. In other words, this function does not alter where any paths point 
+-- to.
 pop :: FSTree -> (FilePath, FSForest)
 pop fs = (path, P.map prepend cs)
   where path = getL label fs
         cs = getL children fs
         prepend = modL label (path </>)
 
+-- | > pop_ = snd . pop
 pop_ :: FSTree -> FSForest
 pop_ = snd . pop
 
+-- |Flattens a filesystem tree into a list of its contents. This is a pre-order 
+-- traversal of the tree.
 flatten :: FSTree -> [FilePath]
 flatten = Tree.flatten . prependPaths 
 
+-- |A post-order traversal of the filesystem tree.
 flattenPostOrder :: FSTree -> [FilePath]
 flattenPostOrder = toList . flatten' . prependPaths
   where flatten' (Node p cs) = DL.concat (P.map flatten' cs) `snoc` p  
 
+-- |Applies a function over the filepaths of a directory tree. 
+--
+-- Because we can't guarantee that the internal 'FSTree' representation is preserved 
+-- in any way, the result is a regular 'Tree'.
 map :: (FilePath -> b) -> FSTree -> Tree b
 map f = fmap f . toTree
 
+-- |Applies a monadic action to every filepath in a filesystem tree.
 mapM :: Monad m => (FilePath -> m b) -> FSTree -> m (Tree b)
 mapM f = T.mapM f . toTree
 
+-- |'mapM' with the result discarded.
 mapM_ :: Monad m => (FilePath -> m b) -> FSTree -> m () 
 mapM_ f t = mapM f t >> return ()
 
+-- |Applies a predicate to each path name in a filesystem forest, and removes
+-- all unsuccessful paths from the result. 
+-- 
+-- Note that if a directory fails the predicate test, then all of its children are 
+-- removed as well.
 filter :: (FilePath -> Bool) -> FSForest -> FSForest
 filter p = fst . extract p
 
+-- |Find all sub-forests within a forest that match the given predicate.
 find :: (FilePath -> Bool) -> FSForest -> FSForest
 find p = snd . extract p
 
+-- |A combination of a 'find' and a 'map'. This could be useful if you want to
+-- handle certain directories specially from others within a sub-filesystem.
 extract :: (FilePath -> Bool) -> FSForest -> (FSForest, FSForest)
 extract p = runIdentity . extractM (return . p)
 
+-- |Monadic 'filter'.
 filterM :: Monad m =>
            (FilePath -> m Bool) -> FSForest -> m FSForest
 filterM p = liftM fst . extractM p
 
+-- |Monadic 'find'.
 findM :: Monad m =>
          (FilePath -> m Bool) -> FSForest -> m FSForest
 findM p = liftM snd . extractM p
 
+-- |Monadic 'extract'.
 extractM :: Monad m => 
             (FilePath -> m Bool) -> FSForest -> m (FSForest, FSForest)
 extractM p = liftM (second toList) . extractM_ p
@@ -233,14 +282,17 @@ extractM_ p = foldrM extract' ([], DL.empty) . P.map prependPaths
           return (ts, FSTree t `cons` es)
         )
 
-truncateAt :: TreeLens t a => Word -> [t] -> [t]
-truncateAt n = mapMaybe (truncate' 0)
+-- |Truncate a tree to a given maximum level, where root is level 0.  
+truncateAt :: TreeLens t a => Word -> t -> t
+truncateAt n = modL children (mapMaybe (truncate' 1))
   where 
     truncate' i t
-      | i >= n = Nothing
+      | i > n = Nothing
       | otherwise = Just . modL children (mapMaybe (truncate' (i+1))) $ t
 
 
+-- |Converts a 'FSTree' to a 'Tree' where each node in the 'Tree' contains the
+-- full path name of the filesystem node it represents.
 prependPaths :: FSTree -> Tree FilePath
 prependPaths (FSTree root) = modL children (P.map (prepend' rootPath)) root
   where
@@ -248,22 +300,37 @@ prependPaths (FSTree root) = modL children (P.map (prepend' rootPath)) root
     prepend' parentPath = prependChildren . modL label (parentPath </>)
     prependChildren fs = modL children (P.map (prepend' (rootLabel fs))) fs
 
+-- |Copy a filesystem tree to a new location, creating directories as necessary.
+-- The resulting 'FSTree' represents all of the copied directories/files in their 
+-- new home.
+--
+-- Note that an single exception will halt the entire operation.
 copyTo :: FilePath -> FSTree -> IO FSTree
-copyTo = zipWithDestM_ $ \src dest ->ifM (isDir src)
+copyTo = zipWithDestM_ $ \src dest ->ifM (isRealDir src)
                                      (createDirectoryIfMissing False dest) 
                                      (copyFile src dest)
 
 copyTo_ :: FilePath -> FSTree -> IO ()
 copyTo_ = (void .) . copyTo
 
+-- |Move a filesystem tree to a new location, deleting any file/directory that
+-- was present at the given destination path.
+--
+-- Directories listed in the source filesystem tree are removed if the move
+-- operation empties their contents completely. The resulting 'FSTree' represents 
+-- all the moved directories/files in their new home.
+--
+-- Note that an single exception will halt the entire operation.
 moveTo :: FilePath -> FSTree ->  IO FSTree
 moveTo dest fs = do
-  whenM (isDir dest) $ remove =<< getDirectory dest
+  condM [(isSymLink dest <||> isFile dest, removeFile dest)
+        ,(isDir  dest,                     removeDirectoryRecursive dest)
+        ,(otherwiseM,                      return ())
+        ]
   zipWithDestM_
-    (\s d -> ifM (isDir s) 
+    (\s d -> ifM (isRealDir s) 
              (do tryRemoveDirectory s
                  createDirectory d)
-             
              (renameFile s d)
     )
     dest fs
@@ -272,9 +339,13 @@ moveTo dest fs = do
 moveTo_ :: FilePath -> FSTree -> IO ()
 moveTo_ = (void .) . moveTo
 
+-- |This is similar to 'moveTo', except that whatever was present at the destination
+-- path isn't deleted before the move operation commences.
+--
+-- Note that an single exception will halt the entire operation.
 mergeInto :: FilePath -> FSTree -> IO FSTree
 mergeInto dest fs = zipWithDestM_ 
-                    (\s d -> ifM (isDir s) 
+                    (\s d -> ifM (isRealDir s) 
                                  (createDirectoryIfMissing False d) 
                                  (renameFile s d)
                     )
@@ -284,46 +355,66 @@ mergeInto dest fs = zipWithDestM_
 mergeInto_ :: FilePath -> FSTree -> IO ()
 mergeInto_ = (void .) . mergeInto
 
+-- |Remove a given filesystem tree. Directories are only removed
+-- if the remove operation empties its contents.
+--
+-- Note that an single exception will halt the entire operation.
 remove :: FSTree -> IO ()
 remove = void . tryRemoveWith throwIO
 
+-- |A variant of 'remove'. 'IOExceptions' do not stop the removal
+-- process, and all 'IOExceptions' are accumulated into a list as the result of
+-- the operation.
 tryRemove :: FSTree -> IO [IOException]
 tryRemove = tryRemoveWith return
 
+-- |A variant of 'remove'. Allows you to specify your own exception handler to handle
+-- exceptions for each removal operation.
 tryRemoveWith :: (IOException -> IO a) -> FSTree -> IO [a]
 tryRemoveWith handler = fmap (catMaybes . DL.toList) . remove' . prependPaths
   where remove' (Node p cs) =
           DL.snoc   <$> (fmap DL.concat . P.mapM remove' $ cs)
                     <*> ifM (doesDirectoryExist p)
-                            (removeDirectory p >> return Nothing)
-                            (removeFile p      >> return Nothing)
+                            (tryRemoveDirectory p >> return Nothing)
+                            (removeFile p         >> return Nothing)
                             `catch` (fmap Just . handler)
             
 
+
+
+-- |Helper function for removals.
 removeEmptyDirectories :: FSTree -> IO ()
 removeEmptyDirectories = P.mapM_ tryRemoveDirectory . flattenPostOrder
 
+-- |Helper function for removals.
 tryRemoveDirectory :: FilePath -> IO ()
 tryRemoveDirectory path = removeDirectory path `catch` handler
   where handler :: IOException -> IO () 
         handler = const (return ())
 
+-- |A generalization of the various move, copy, and remove operations. This
+-- operation pairs each node of a 'FSTree' with a second path formed by rerooting
+-- the filesystem tree to the given destination path.
 zipWithDest :: (FilePath -> FilePath -> a)
                -> FilePath -> FSTree
                -> [a]
 zipWithDest f dest fs = runIdentity $ zipWithDestM ((return .) . f) dest fs 
 
+-- |Monadic 'zipWithDest'
 zipWithDestM :: Monad m => (FilePath -> FilePath -> m a)
                 -> FilePath -> FSTree
                 -> m [a]
 zipWithDestM f dest fs = liftM fst $ zipWithDestM__ f dest fs
 
+-- |A variant of 'zipWithDestM' where the result is discarded and instead the 
+-- rerooted filesystem tree is returned.
 zipWithDestM_ :: Monad m => 
                  (FilePath -> FilePath -> m a)
                 -> FilePath -> FSTree
                 -> m FSTree
 zipWithDestM_ f dest fs = liftM snd $ zipWithDestM__ f dest fs
 
+-- |Internal implementation of the zipWithDest* operations.
 zipWithDestM__ :: Monad m =>
                   (FilePath -> FilePath -> m a)
                   -> FilePath -> FSTree
