@@ -62,7 +62,7 @@ import qualified Data.Traversable as T (mapM)
 import Data.Maybe (mapMaybe, catMaybes)
 import Data.Function (on)
 import Data.Lens.Common (Lens, lens, getL, setL, modL)
-import Control.Cond (ifM, (<&&>), notM, whenM)
+import Control.Conditional (ifM, (<&&>), notM, whenM)
 
 import Data.Word (Word)
 import Data.Typeable (Typeable)
