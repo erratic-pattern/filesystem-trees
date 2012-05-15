@@ -12,13 +12,13 @@ module System.File.Tree
        , TreeLens(..)
          -- *Retrieve directory trees from the filesystem
        , getDirectory, getDirectory'
-         -- **IO operations on directory trees
-         -- ***copy
+         -- *IO operations on directory trees
+         -- **copy
        , copyTo, copyTo_
-         -- ***move
+         -- **move
        , moveTo, moveTo_
        , mergeInto, mergeInto_
-         -- ***remove
+         -- **remove
        , remove, tryRemove, tryRemoveWith              
          -- * Operations on directory trees
          -- **basic operations
