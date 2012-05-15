@@ -1,12 +1,13 @@
 Name: filesystem-trees
 Version: 0.0
-Synopsis: Recursively manipulate and traverse filesystems as rose trees.
+Synopsis: Recursively manipulate and traverse filesystems as lazy rose trees.
 Cabal-Version: >= 1.10
 License: BSD3
 License-File: LICENSE
 Author: Adam Curtis
 Maintainer: acurtis@spsu.edu
 Build-Type: Simple
+Category: System, Data
 
 library
   default-language: Haskell2010
