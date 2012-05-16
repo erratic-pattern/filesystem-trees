@@ -347,7 +347,7 @@ copyTo_ = (void .) . copyTo
 -- |Move a filesystem tree to a new location, deleting any file/directory that
 -- was present at the given destination path.
 --
--- Directories listed in the source filesystem tree are removed if the move
+-- Directories listed in the source filesystem tree are removed from disk if the move
 -- operation empties their contents completely. The resulting 'FSTree' represents 
 -- all the moved directories/files in their new home.
 --
