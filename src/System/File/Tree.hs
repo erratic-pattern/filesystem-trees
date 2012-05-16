@@ -247,11 +247,10 @@ filter p = runIdentity . filterM (return . p)
 find :: (FilePath -> Bool) -> FSForest -> FSForest
 find p = snd . extract p
 
--- |A generalization of 'find'. The first element of the result 
--- represents the forest after removing all subtrees that match the given predicate, 
--- and the second element is a list of trees that matched. This could be useful if 
--- you want to handle certain directories specially from others within a 
--- sub-filesystem.
+-- |The first element of the result represents the forest after removing all 
+-- subtrees that match the given predicate, and the second element is a list of 
+-- trees that matched. This could be useful if you want to handle certain 
+-- directories specially from others within a sub-filesystem.
 extract :: (FilePath -> Bool) -> FSForest -> (FSForest, FSForest)
 extract p = runIdentity . extractM (return . p)
 
