@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, DeriveDataTypeable, 
+{-# LANGUAGE CPP, GeneralizedNewtypeDeriving, DeriveDataTypeable, 
              FlexibleInstances, MultiParamTypeClasses, FunctionalDependencies,
              TypeSynonymInstances, RankNTypes
   #-}
@@ -179,9 +179,14 @@ isFile = doesFileExist
 isDir :: FilePath -> IO Bool
 isDir = doesDirectoryExist
 
--- |Checks if a path refers to a symbolic link
+-- |Checks if a path refers to a symbolic link. 
+-- NOTE: always returns False on Windows
 isSymLink :: FilePath -> IO Bool
+#if CABAL_OS_WINDOWS
+isSymLink p = return False
+#else
 isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
+#endif
 
 -- |Checks if a path refers to a symbolically linked directory 
 isSymDir :: FilePath -> IO Bool
