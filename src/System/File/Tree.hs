@@ -54,6 +54,7 @@ import qualified Data.Tree as Tree (flatten, levels)
 import Data.DList as DL (DList(..), cons, append, toList, empty, concat, snoc)
 
 import Control.Exception (throwIO, catch, IOException)
+import System.IO.Error (ioeGetErrorType, doesNotExistErrorType)
 import Control.Monad (forM, liftM, liftM2, void)
 import Control.Monad.Identity (runIdentity)
 import Control.Applicative ((<$>), (<*>), (<*))
@@ -184,13 +185,18 @@ isFile = doesFileExist
 isDir :: FilePath -> IO Bool
 isDir = doesDirectoryExist
 
--- |Checks if a path refers to a symbolic link. 
+-- |Checks if a path refers to a symbolic link.
 -- NOTE: always returns False on Windows
 isSymLink :: FilePath -> IO Bool
 #if CABAL_OS_WINDOWS
 isSymLink p = return False
 #else
-isSymLink p = isSymbolicLink <$> getSymbolicLinkStatus p
+isSymLink p = (isSymbolicLink <$> getSymbolicLinkStatus p)
+              `catch` handler
+  where handler :: IOError -> IO Bool 
+        handler e
+          | ioeGetErrorType e == doesNotExistErrorType = return False
+          | otherwise = throwIO e
 #endif
 
 -- |Checks if a path refers to a symbolically linked directory 
@@ -354,8 +360,7 @@ moveTo dest fs = do
         ]
   zipWithDestM_
     (\s d -> ifM (isRealDir s) 
-             (do tryRemoveDirectory s
-                 createDirectory d)
+             (createDirectory d)
              (renameFile s d)
     )
     dest fs
