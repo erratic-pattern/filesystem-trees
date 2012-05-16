@@ -63,7 +63,9 @@ import qualified Data.Traversable as T (mapM)
 import Data.Maybe (mapMaybe, catMaybes)
 import Data.Function (on)
 import Data.Lens.Common (Lens, lens, getL, setL, modL)
+import Control.DeepSeq (NFData(..), deepseq)
 import Control.Conditional (ifM, (<&&>), (<||>), notM, condM, otherwiseM)
+
 
 import Data.Word (Word)
 import Data.Typeable (Typeable)
@@ -111,6 +113,12 @@ import qualified Prelude as P
 -- >  `- b
 newtype FSTree = FSTree { toTree :: Tree FilePath } deriving 
                 (Typeable, Data, Eq, Read, Show)
+
+instance NFData FSTree where
+  rnf t = getL label t `deepseq` rnf (getL children t)
+
+--instance NFData FSForest where
+--  rnf t = get
 
 type FSForest = [FSTree]
 

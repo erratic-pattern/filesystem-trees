@@ -24,4 +24,5 @@ library
                  , dlist >= 0.2 && < 1.0
                  , mtl >= 1.0 && < 3.0
                  , cond >= 0.3 && < 0.5
+                 , deepseq >= 1.1 && < 1.5
   exposed-modules: System.File.Tree
