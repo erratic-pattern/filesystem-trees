@@ -181,7 +181,7 @@ getDir_ f p = mkFSTree p <$> getChildren p
 isFile :: FilePath -> IO Bool
 isFile = doesFileExist
 
--- |Checks if a path refer to a directory.
+-- |Checks if a path refers to a directory.
 isDir :: FilePath -> IO Bool
 isDir = doesDirectoryExist
 
