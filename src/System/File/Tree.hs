@@ -245,10 +245,13 @@ filter p = fst . extract p
 
 -- |Find all sub-forests within a forest that match the given predicate.
 find :: (FilePath -> Bool) -> FSForest -> FSForest
-find p = snd . extract p
+find p = snd . extract (not . p)
 
--- |A combination of a 'find' and a 'map'. This could be useful if you want to
--- handle certain directories specially from others within a sub-filesystem.
+-- |A generalization of 'find' and 'filter'. The first element of the result 
+-- represents the forest after filtering with the given predicate, and the second 
+-- element is a list of trees that didn't match the predicate. This could be useful 
+-- if you want to handle certain directories specially from others within a 
+-- sub-filesystem.
 extract :: (FilePath -> Bool) -> FSForest -> (FSForest, FSForest)
 extract p = runIdentity . extractM (return . p)
 
@@ -260,7 +263,7 @@ filterM p = liftM fst . extractM p
 -- |Monadic 'find'.
 findM :: Monad m =>
          (FilePath -> m Bool) -> FSForest -> m FSForest
-findM p = liftM snd . extractM p
+findM p = liftM snd . extractM (notM . p)
 
 -- |Monadic 'extract'.
 extractM :: Monad m => 
