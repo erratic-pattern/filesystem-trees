@@ -22,7 +22,7 @@ module System.File.Tree
        , remove, tryRemove, tryRemoveWith              
          -- * Operations on directory trees
          -- **basic operations
-       , pop, pop_, flatten, flattenPostOrder
+       , pop, pop_, flatten, flattenPostOrder, levels
          -- ** map over subtrees
        , map, mapM, mapM_
          -- **find subtrees
@@ -50,7 +50,7 @@ import System.FilePath ((</>))
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 
 import Data.Tree (Tree(..), Forest)
-import qualified Data.Tree as Tree (flatten)
+import qualified Data.Tree as Tree (flatten, levels)
 import Data.DList as DL (DList(..), cons, append, toList, empty, concat, snoc)
 
 import Control.Exception (throwIO, catch, IOException)
@@ -116,9 +116,6 @@ newtype FSTree = FSTree { toTree :: Tree FilePath } deriving
 
 instance NFData FSTree where
   rnf t = getL label t `deepseq` rnf (getL children t)
-
---instance NFData FSForest where
---  rnf t = get
 
 type FSForest = [FSTree]
 
@@ -234,6 +231,10 @@ flatten = Tree.flatten . prependPaths
 flattenPostOrder :: FSTree -> [FilePath]
 flattenPostOrder = toList . flatten' . prependPaths
   where flatten' (Node p cs) = DL.concat (P.map flatten' cs) `snoc` p  
+
+-- |List of file paths at each level of the tree.
+levels :: FSTree -> [[FilePath]]
+levels = Tree.levels . prependPaths
 
 -- |Applies a function over the filepaths of a directory tree. 
 --
