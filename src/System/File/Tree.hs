@@ -118,9 +118,11 @@ type FSForest = [FSTree]
 mkFSTree :: FilePath -> FSForest -> FSTree
 mkFSTree a = FSTree . Node a . mapToTree
 
+-- |Efficiently maps 'FSTree' over a list. This is more efficient than map FSTree 
 mapFSTree :: Forest FilePath -> FSForest
 mapFSTree = unsafeCoerce
 
+-- |Efficiently maps toTree over a list. This is more effficient than map toTree
 mapToTree :: FSForest -> Forest FilePath
 mapToTree = unsafeCoerce
 
@@ -236,21 +238,19 @@ mapM_ :: Monad m => (FilePath -> m b) -> FSTree -> m ()
 mapM_ f t = mapM f t >> return ()
 
 -- |Applies a predicate to each path name in a filesystem forest, and removes
--- all unsuccessful paths from the result. 
--- 
--- Note that if a directory fails the predicate test, then all of its children are 
--- removed as well.
+-- all unsuccessful paths from the result. If a directory fails the predicate test, 
+-- then it will only be removed if all of its children also fail the test
 filter :: (FilePath -> Bool) -> FSForest -> FSForest
-filter p = fst . extract p
+filter p = runIdentity . filterM (return . p)
 
 -- |Find all sub-forests within a forest that match the given predicate.
 find :: (FilePath -> Bool) -> FSForest -> FSForest
-find p = snd . extract (not . p)
+find p = snd . extract p
 
--- |A generalization of 'find' and 'filter'. The first element of the result 
--- represents the forest after filtering with the given predicate, and the second 
--- element is a list of trees that didn't match the predicate. This could be useful 
--- if you want to handle certain directories specially from others within a 
+-- |A generalization of 'find'. The first element of the result 
+-- represents the forest after removing all subtrees that match the given predicate, 
+-- and the second element is a list of trees that matched. This could be useful if 
+-- you want to handle certain directories specially from others within a 
 -- sub-filesystem.
 extract :: (FilePath -> Bool) -> FSForest -> (FSForest, FSForest)
 extract p = runIdentity . extractM (return . p)
@@ -258,12 +258,21 @@ extract p = runIdentity . extractM (return . p)
 -- |Monadic 'filter'.
 filterM :: Monad m =>
            (FilePath -> m Bool) -> FSForest -> m FSForest
-filterM p = liftM fst . extractM p
+filterM p = foldrM (filter' . prependPaths) []
+  where filter' (Node path cs) ts =
+          ifM (p path)
+          (liftM ((:ts) . mkFSTree path) $ foldrM filter' [] cs)
+          (do
+              cs' <- foldrM filter' [] $ cs
+              return $ case cs' of
+                [] -> ts
+                _  -> mkFSTree path cs' : ts
+          )
 
 -- |Monadic 'find'.
 findM :: Monad m =>
          (FilePath -> m Bool) -> FSForest -> m FSForest
-findM p = liftM snd . extractM (notM . p)
+findM p = liftM snd . extractM p
 
 -- |Monadic 'extract'.
 extractM :: Monad m => 
@@ -276,13 +285,13 @@ extractM_ p = foldrM extract' ([], DL.empty) . P.map prependPaths
   where 
     extract' t@(Node path cs) (ts, es)
       = ifM (p path)
-        ( do
-             (cs', es') <- foldrM extract' (ts, es) cs
-             let t' = mkFSTree path cs'
-             return (t' : ts, es' `append` es)
-        )
         (
-          return (ts, FSTree t `cons` es)
+             return (ts, FSTree t `cons` es)
+        )
+        (do
+            (cs', es') <- foldrM extract' ([], DL.empty) cs
+            let t' = mkFSTree path cs'
+            return (t' : ts, es' `append` es)
         )
 
 -- |Truncate a tree to a given maximum level, where root is level 0.  
