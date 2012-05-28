@@ -127,10 +127,12 @@ mkFSTree a = FSTree . Node a . mapToTree
 -- |Efficiently maps 'FSTree' over a list. This is more efficient than map FSTree 
 mapFSTree :: Forest FilePath -> FSForest
 mapFSTree = unsafeCoerce
+{-# NOINLINE mapFSTree #-}
 
 -- |Efficiently maps toTree over a list. This is more effficient than map toTree
 mapToTree :: FSForest -> Forest FilePath
 mapToTree = unsafeCoerce
+{-# NOINLINE mapToTree #-}
 
 -- |Overloaded lenses for 'Tree' and 'FSTree'
 class TreeLens t a | t -> a where
@@ -156,6 +158,7 @@ instance TreeLens FSTree FilePath where
 -- current directories and relative paths apply to the tree as a whole.
 getDirectory :: FilePath -> IO FSTree
 getDirectory = getDir_ unsafeInterleaveIO
+{-# NOINLINE getDirectory #-}
 
 -- |A strict variant of 'getDirectory'. 
 --
@@ -277,16 +280,18 @@ extract p = runIdentity . extractM (return . p)
 -- |Monadic 'filter'.
 filterM :: Monad m =>
            (FilePath -> m Bool) -> FSForest -> m FSForest
-filterM p = foldrM (filter' . prependPaths) []
-  where filter' (Node path cs) ts =
-          ifM (p path)
-          (liftM ((:ts) . mkFSTree path) $ foldrM filter' [] cs)
-          (do
-              cs' <- foldrM filter' [] $ cs
-              return $ case cs' of
-                [] -> ts
-                _  -> mkFSTree path cs' : ts
-          )
+filterM p = foldrM (filter' "") [] . mapToTree
+  where 
+    filter' d (Node file cs) ts = do
+      let path = d </> file
+      cs' <- foldrM (filter' path) [] cs
+      b <- p path
+      return $ 
+        if b
+        then mkFSTree file cs' : ts
+        else case cs' of
+          [] -> ts
+          _  -> mkFSTree file cs' : ts
 
 -- |Monadic 'find'.
 findM :: Monad m =>
@@ -450,7 +455,7 @@ zipWithDestM__ :: Monad m =>
                   -> FilePath -> FSTree
                   -> m ([a], FSTree)
 zipWithDestM__ f rootDest  fs =
-  liftM2 (,) (sequence $ (zipWith f `on` flatten) fs destFs)
+  liftM2 (,) (sequence $ zipWith f (flatten fs) (flatten destFs))
              (return destFs)
   where
     destFs = setL label rootDest fs
