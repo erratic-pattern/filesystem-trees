@@ -1,5 +1,5 @@
 Name: filesystem-trees
-Version: 0.1.0.1
+Version: 0.1.0.2
 Synopsis: Recursively manipulate and traverse filesystems as lazy rose trees.
 Cabal-Version: >= 1.10
 License: BSD3
