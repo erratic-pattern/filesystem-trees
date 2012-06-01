@@ -6,6 +6,7 @@ License: BSD3
 License-File: LICENSE
 Author: Adam Curtis
 Maintainer: acurtis@spsu.edu
+Homepage: https://github.com/kallisti-dev/filesystem-trees
 Build-Type: Simple
 Category: System, Data
 
