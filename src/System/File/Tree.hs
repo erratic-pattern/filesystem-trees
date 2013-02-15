@@ -47,7 +47,7 @@ import System.Directory (getDirectoryContents, doesDirectoryExist, doesFileExist
                          createDirectoryIfMissing, removeDirectory,
                          removeDirectoryRecursive)
 import System.FilePath ((</>))
-#if !CABAL_OS_WINDOWS
+#if !mingw32_HOST_OS
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 #endif
 
@@ -192,7 +192,7 @@ isDir = doesDirectoryExist
 -- |Checks if a path refers to a symbolic link.
 -- NOTE: always returns False on Windows
 isSymLink :: FilePath -> IO Bool
-#if CABAL_OS_WINDOWS
+#if mingw32_HOST_OS
 isSymLink p = return False
 #else
 isSymLink p = (isSymbolicLink <$> getSymbolicLinkStatus p)
