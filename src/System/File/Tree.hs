@@ -37,7 +37,7 @@ module System.File.Tree
        , truncateAt
          -- **zip with destination tree
        , zipWithDest, zipWithDestM, zipWithDestM_
-       )where
+       ) where
 
 import System.IO.Unsafe (unsafeInterleaveIO)
 import Unsafe.Coerce (unsafeCoerce)
@@ -47,7 +47,9 @@ import System.Directory (getDirectoryContents, doesDirectoryExist, doesFileExist
                          createDirectoryIfMissing, removeDirectory,
                          removeDirectoryRecursive)
 import System.FilePath ((</>))
+#if !CABAL_OS_WINDOWS
 import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
+#endif
 
 import Data.Tree (Tree(..), Forest)
 import qualified Data.Tree as Tree (flatten, levels)
