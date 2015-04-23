@@ -64,7 +64,7 @@ import Control.Arrow (second)
 import Data.Foldable (foldrM)
 import qualified Data.Traversable as T (mapM)
 import Data.Maybe (mapMaybe, catMaybes)
-import Data.Lens.Common (Lens, lens, getL, setL, modL)
+import Data.Lens.Light (Lens, lens, getL, setL, modL)
 import Control.DeepSeq (NFData(..), deepseq)
 import Control.Conditional (ifM, (<&&>), (<||>), notM, condM, otherwiseM)
 
