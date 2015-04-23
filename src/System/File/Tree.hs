@@ -53,7 +53,7 @@ import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 
 import Data.Tree (Tree(..), Forest)
 import qualified Data.Tree as Tree (flatten, levels)
-import Data.DList as DL (DList(..), cons, append, toList, empty, concat, snoc)
+import Data.DList as DL (DList, cons, append, toList, empty, concat, snoc)
 
 import Control.Exception (throwIO, catch, IOException)
 import System.IO.Error (ioeGetErrorType, doesNotExistErrorType)
