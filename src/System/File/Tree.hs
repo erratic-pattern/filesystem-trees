@@ -53,7 +53,7 @@ import System.Posix.Files (getSymbolicLinkStatus, isSymbolicLink)
 
 import Data.Tree (Tree(..), Forest)
 import qualified Data.Tree as Tree (flatten, levels)
-import Data.DList as DL (DList(..), cons, append, toList, empty, concat, snoc)
+import Data.DList as DL (DList, cons, append, toList, empty, concat, snoc)
 
 import Control.Exception (throwIO, catch, IOException)
 import System.IO.Error (ioeGetErrorType, doesNotExistErrorType)
@@ -64,7 +64,7 @@ import Control.Arrow (second)
 import Data.Foldable (foldrM)
 import qualified Data.Traversable as T (mapM)
 import Data.Maybe (mapMaybe, catMaybes)
-import Data.Lens.Common (Lens, lens, getL, setL, modL)
+import Data.Lens.Light (Lens, lens, getL, setL, modL)
 import Control.DeepSeq (NFData(..), deepseq)
 import Control.Conditional (ifM, (<&&>), (<||>), notM, condM, otherwiseM)
 
